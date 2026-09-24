@@ -9,7 +9,7 @@
  *   "Benefits Helper"    answers with a single A2A Message (no task).
  *   "Workday Native Bot" has no URL, so it is listed but not invocable.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,12 @@ export interface MockOptions {
   pageSize?: number;
   /** Require this bearer token on the A2A endpoints. */
   agentToken?: string;
+  /** The redirect URI registered on the mock API client (Authorization Code grant). Any URI is accepted if unset. */
+  redirectUri?: string;
+  /** Simulate the user clicking Deny on the consent screen. */
+  denyAuthorize?: boolean;
+  /** Lifetime reported as refresh_token_expires_in on authorization-code grants. */
+  refreshTokenExpiresIn?: number;
 }
 
 export interface MockState {
@@ -37,6 +43,8 @@ export interface MockState {
   validRefreshTokens: Set<string>;
   validAccessTokens: Set<string>;
   lastIssuedRefreshToken: string;
+  /** Authorize requests received, with their query parameters. */
+  authorizeRequests: Array<Record<string, string>>;
 }
 
 export interface MockServer {
@@ -60,7 +68,9 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
     validRefreshTokens: new Set([MOCK_REFRESH_TOKEN]),
     validAccessTokens: new Set(),
     lastIssuedRefreshToken: MOCK_REFRESH_TOKEN,
+    authorizeRequests: [],
   };
+  const codes = new Map<string, { redirectUri: string; challenge: string | null }>();
   let origin = '';
   const agents: Card[] = [];
   const tasks = new Map<string, { polls: number; mode: string; text: string; contextId: string }>();
@@ -121,6 +131,30 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
     const basic = Buffer.from((req.headers.authorization ?? '').replace(/^Basic /, ''), 'base64').toString();
     if (tenant !== MOCK_TENANT) return send(res, 404, { error: 'invalid_tenant' });
     if (basic !== `${MOCK_CLIENT_ID}:${MOCK_CLIENT_SECRET}`) return send(res, 401, { error: 'invalid_client' });
+    if (body.get('grant_type') === 'authorization_code') {
+      const code = body.get('code') ?? '';
+      const grant = codes.get(code);
+      codes.delete(code); // single use
+      if (!grant) return send(res, 400, { error: 'invalid_grant', error_description: 'Invalid or reused authorization code' });
+      if (body.get('redirect_uri') !== grant.redirectUri) return send(res, 400, { error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
+      if (grant.challenge) {
+        const verifier = body.get('code_verifier') ?? '';
+        if (createHash('sha256').update(verifier).digest('base64url') !== grant.challenge) return send(res, 400, { error: 'invalid_grant', error_description: 'PKCE verification failed' });
+      }
+      state.tokenExchanges += 1;
+      const accessToken = `mock-access-${randomUUID()}`;
+      const refreshToken = `mock-refresh-ac-${randomUUID()}`;
+      state.validAccessTokens.add(accessToken);
+      state.validRefreshTokens.add(refreshToken);
+      state.lastIssuedRefreshToken = refreshToken;
+      return send(res, 200, {
+        access_token: accessToken,
+        token_type: 'Bearer',
+        expires_in: 3600,
+        refresh_token: refreshToken,
+        ...(opts.refreshTokenExpiresIn ? { refresh_token_expires_in: opts.refreshTokenExpiresIn } : {}),
+      });
+    }
     if (body.get('grant_type') !== 'refresh_token' || !state.validRefreshTokens.has(body.get('refresh_token') ?? '')) {
       return send(res, 400, { error: 'invalid_grant', error_description: 'Invalid refresh token' });
     }
@@ -136,6 +170,28 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
       out.refresh_token = next;
     }
     send(res, 200, out);
+  };
+
+  /** Stands in for Workday's sign-in + consent: redirects straight back as if the user clicked Allow (or Deny). */
+  const handleAuthorize = (res: ServerResponse, tenant: string, query: URLSearchParams) => {
+    state.authorizeRequests.push(Object.fromEntries(query));
+    const redirectUri = query.get('redirect_uri') ?? '';
+    if (tenant !== MOCK_TENANT) return send(res, 404, { error: 'invalid_tenant' });
+    if (query.get('client_id') !== MOCK_CLIENT_ID) return send(res, 400, { error: 'invalid_client' });
+    if (query.get('response_type') !== 'code') return send(res, 400, { error: 'unsupported_response_type' });
+    if (!redirectUri || (opts.redirectUri && redirectUri !== opts.redirectUri)) return send(res, 400, { error: 'invalid_request', error_description: 'redirect_uri does not match the API client' });
+    const back = new URL(redirectUri);
+    const stateParam = query.get('state');
+    if (stateParam) back.searchParams.set('state', stateParam);
+    if (opts.denyAuthorize) {
+      back.searchParams.set('error', 'access_denied');
+    } else {
+      const code = `mock-code-${randomUUID()}`;
+      codes.set(code, { redirectUri, challenge: query.get('code_challenge_method') === 'S256' ? query.get('code_challenge') : null });
+      back.searchParams.set('code', code);
+    }
+    res.writeHead(302, { Location: back.toString() });
+    res.end();
   };
 
   const handleAsor = async (req: IncomingMessage, res: ServerResponse, path: string, query: URLSearchParams) => {
@@ -253,6 +309,7 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
     const route = async () => {
       let m: RegExpExecArray | null;
       if (req.method === 'POST' && (m = /^\/auth\/oauth2\/([^/]+)\/token$/.exec(path))) return handleToken(req, res, decodeURIComponent(m[1]!));
+      if (req.method === 'GET' && (m = /^\/auth\/authorize\/([^/]+)$/.exec(path))) return handleAuthorize(res, decodeURIComponent(m[1]!), url.searchParams);
       if (path.startsWith('/asor/v1/')) return handleAsor(req, res, path.slice('/asor/v1'.length), url.searchParams);
       if (req.method === 'POST' && (m = /^\/a2a\/(echo|benefits)$/.exec(path))) return handleA2A(req, res, m[1]!);
       send(res, 404, { error: 'not found' });

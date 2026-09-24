@@ -11,3 +11,5 @@ wrapped/
 examples/**/node_modules/
 asor-agents/
 .playwright-mcp/
+LIVE_TENANT_PLAN.md
+test/fixtures/live-*

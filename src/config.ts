@@ -23,6 +23,15 @@ export interface Profile {
   /** Override for the ASOR API base. Defaults to `https://{host}/asor/v1`. */
   asorBaseUrl?: string;
   agentAuth?: AgentAuthMode;
+  /** How the refresh token was obtained: pasted in, or via `asor login --authorize` (Authorization Code grant). */
+  authMode?: 'refresh_token' | 'authorization_code';
+  /** Authorization Code settings, kept so re-authorizing needs no flags. */
+  authorizeUrl?: string;
+  redirectUri?: string;
+  /** ISO time of the last successful `--authorize`. */
+  authorizedAt?: string;
+  /** Refresh token lifetime in days, from Workday's response or `--refresh-ttl-days`. Informational. */
+  refreshTokenTtlDays?: number;
 }
 
 export interface ConfigFile {
@@ -48,6 +57,9 @@ export interface ResolvedConfig {
   /** Where each value came from, so rotation knows whether it can persist a new refresh token. */
   refreshTokenSource: 'env' | 'file' | 'none';
   profileExists: boolean;
+  authMode: 'refresh_token' | 'authorization_code';
+  authorizedAt: string | undefined;
+  refreshTokenTtlDays: number | undefined;
 }
 
 type Env = Record<string, string | undefined>;
@@ -153,6 +165,9 @@ export function resolveConfig(opts: { profile?: string; env?: Env } = {}): Resol
     agentToken: env.ASOR_AGENT_TOKEN || undefined,
     refreshTokenSource: env.ASOR_REFRESH_TOKEN ? 'env' : saved.refreshToken ? 'file' : 'none',
     profileExists: Boolean(file.profiles[profileName]),
+    authMode: saved.authMode ?? 'refresh_token',
+    authorizedAt: saved.authorizedAt,
+    refreshTokenTtlDays: saved.refreshTokenTtlDays,
   };
 }
 

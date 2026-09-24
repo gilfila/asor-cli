@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -13,6 +12,7 @@ import { resolveAgent } from '../resolve.js';
 import { summarize } from '../types.js';
 import { VERSION } from '../version.js';
 import { commandName, generateWrapper, surfaceSnippets } from '../wrap.js';
+import { openBrowser } from '../open.js';
 import { zipDirectory } from './zip.js';
 
 export interface UiOptions {
@@ -260,14 +260,4 @@ function sendText(res: ServerResponse, status: number, text: string): void {
   res.end(text);
 }
 
-/** Opens the default browser. The URL is ours (loopback + token), never user input. */
-function openBrowser(url: string): void {
-  const [cmd, args] =
-    process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url.replace(/&/g, '^&')]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
-  try {
-    spawn(cmd, args, { stdio: 'ignore', detached: true, windowsHide: true }).on('error', () => {}).unref();
-  } catch {
-    // The URL is printed anyway.
-  }
-}
 

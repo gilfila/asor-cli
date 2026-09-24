@@ -39,14 +39,19 @@ export function createContext(flags: GlobalFlags, opts: { fetch?: FetchLike } = 
   return { cfg, tokens, client, flags, debug, fetch: fetchImpl };
 }
 
+/** Just the variables that say where config lives, without any ASOR_* credential overrides. */
+export function configLocationEnv(): Record<string, string | undefined> {
+  return Object.fromEntries(
+    ['ASOR_CONFIG_DIR', 'APPDATA', 'XDG_CONFIG_HOME', 'ASOR_NO_TOKEN_CACHE'].filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]),
+  );
+}
+
 /**
  * Tests a saved profile exactly as stored, ignoring ASOR_* credential overrides, so `login` verifies what the user
  * just typed rather than whatever the environment happens to hold. Returns the number of visible agents.
  */
 export async function verifySavedProfile(profile: string, opts: { fetch?: FetchLike } = {}): Promise<{ tenant: string; agents: number }> {
-  const locationOnly = Object.fromEntries(
-    ['ASOR_CONFIG_DIR', 'APPDATA', 'XDG_CONFIG_HOME', 'ASOR_NO_TOKEN_CACHE'].filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]),
-  );
+  const locationOnly = configLocationEnv();
   const cfg = resolveConfig({ profile, env: locationOnly });
   const fetchImpl = opts.fetch ?? fetch;
   const tokens = new TokenProvider(cfg, { fetch: fetchImpl, env: locationOnly });

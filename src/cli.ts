@@ -4,12 +4,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { TokenProvider } from './auth.js';
-import { configPath, DEFAULT_HOST, DEFAULT_PROFILE, mask, readConfigFile, removeProfile, resolveConfig, saveProfile, type Profile } from './config.js';
-import { createContext, reportError, stderr, stdout, verifySavedProfile, type GlobalFlags } from './context.js';
+import { configPath, DEFAULT_HOST, DEFAULT_PROFILE, mask, normalizeOrigin, readConfigFile, removeProfile, resolveConfig, saveProfile, type Profile } from './config.js';
+import { configLocationEnv, createContext, reportError, stderr, stdout, verifySavedProfile, type GlobalFlags } from './context.js';
 import { CliError, ExitCode, toCliError } from './errors.js';
 import { a2aInvoker } from './invoke.js';
-import { renderAgentCard, renderAgentList, renderTable } from './output.js';
-import { ask } from './prompt.js';
+import { redact, renderAgentCard, renderAgentList, renderTable } from './output.js';
+import { ask, readLine } from './prompt.js';
+import { authorizeUrlFor, isLoopbackRedirect, runAuthorizeFlow } from './oauth.js';
 import { resolveAgent } from './resolve.js';
 import { runInvoke } from './run-invoke.js';
 import { summarize, type AgentCard } from './types.js';
@@ -66,11 +67,18 @@ Options:
                          With --stream, print JSON Lines; the last line is the envelope with "type":"result".
 `;
 
-const HELP_LOGIN = `Usage: asor login [options]
+const DEFAULT_REDIRECT_URI = 'http://localhost:8765/callback';
 
-Saves a profile to ${configPath()} (readable only by you).
+const HELP_LOGIN = `Usage: asor login [options]
+       asor login --authorize [options]     (API clients that use the Authorization Code grant)
+
+Saves a profile to ${configPath()} (readable only by you), then verifies it against Workday.
 Prompts for anything not passed as a flag. Values passed as flags can show up in shell history,
 so prefer the prompts or --from-env for secrets.
+
+With --authorize you sign in to Workday in the browser instead of pasting a refresh token. asor opens
+https://{host}/auth/authorize/{tenant}, receives the code on the client's redirect URI, and stores the
+resulting refresh token. Run it again whenever the refresh token expires.
 
 Options:
   --profile <name>        Profile name (default "${DEFAULT_PROFILE}")
@@ -84,6 +92,17 @@ Options:
   --from-env              Take values from the ASOR_* environment variables
   --default               Make this the default profile
   --no-verify             Save without testing the credentials
+
+Options for --authorize:
+  --redirect-uri <uri>    Must match the API client exactly (default ${DEFAULT_REDIRECT_URI}).
+                          A http://localhost:<port>/... URI is received automatically. For any other URI
+                          (e.g. https://cb.myworkday.com/cb1) you paste the address you land on.
+  --paste                 Paste the redirected address even for a localhost redirect URI
+  --authorize-url <url>   Override the authorize endpoint (default https://{host}/auth/authorize/{tenant})
+  --scope <scope>         Send a scope parameter (normally not needed; the client's scopes apply)
+  --no-pkce               Do not send a PKCE challenge
+  --no-open               Print the sign-in URL without opening a browser
+  --refresh-ttl-days <n>  Record the client's refresh-token lifetime so whoami can warn before it expires
 `;
 
 const HELP_WRAP = `Usage: asor wrap [<agent>] [--out <dir>] [--name <command>] [--force]
@@ -195,18 +214,27 @@ async function cmdLogin(args: string[]): Promise<number> {
     'from-env': { type: 'boolean' },
     default: { type: 'boolean' },
     'no-verify': { type: 'boolean' },
+    authorize: { type: 'boolean' },
+    'authorize-url': { type: 'string' },
+    'redirect-uri': { type: 'string' },
+    paste: { type: 'boolean' },
+    'no-pkce': { type: 'boolean' },
+    'no-open': { type: 'boolean' },
+    scope: { type: 'string' },
+    'refresh-ttl-days': { type: 'string' },
   });
   if (values.help) return stdout(HELP_LOGIN), ExitCode.OK;
 
   const env = values['from-env'] ? process.env : {};
   const name = values.profile ?? DEFAULT_PROFILE;
   const existing = readConfigFile().profiles[name] ?? {};
+  const authorize = Boolean(values.authorize);
   const profile: Profile = {
     host: values.host ?? env.ASOR_HOST ?? existing.host,
     tenant: values.tenant ?? env.ASOR_TENANT ?? existing.tenant,
     clientId: values['client-id'] ?? env.ASOR_CLIENT_ID ?? existing.clientId,
     clientSecret: values['client-secret'] ?? env.ASOR_CLIENT_SECRET ?? existing.clientSecret,
-    refreshToken: values['refresh-token'] ?? env.ASOR_REFRESH_TOKEN ?? existing.refreshToken,
+    refreshToken: authorize ? undefined : (values['refresh-token'] ?? env.ASOR_REFRESH_TOKEN ?? existing.refreshToken),
     tokenUrl: values['token-url'] ?? env.ASOR_TOKEN_URL ?? existing.tokenUrl,
     asorBaseUrl: values['base-url'] ?? env.ASOR_BASE_URL ?? existing.asorBaseUrl,
   };
@@ -220,20 +248,58 @@ async function cmdLogin(args: string[]): Promise<number> {
     if (!profile.clientSecret || !values['client-secret']) {
       profile.clientSecret = (await ask(`API client secret${profile.clientSecret ? ' (Enter to keep saved)' : ''}`, { secret: true })) || profile.clientSecret;
     }
-    if (!profile.refreshToken || !values['refresh-token']) {
+    if (!authorize && (!profile.refreshToken || !values['refresh-token'])) {
       profile.refreshToken = (await ask(`Refresh token${profile.refreshToken ? ' (Enter to keep saved)' : ''}`, { secret: true })) || profile.refreshToken;
     }
   }
   profile.host ??= DEFAULT_HOST;
 
-  const missing = (['tenant', 'clientId', 'clientSecret', 'refreshToken'] as const).filter((k) => !profile[k]);
+  const required = authorize ? (['tenant', 'clientId', 'clientSecret'] as const) : (['tenant', 'clientId', 'clientSecret', 'refreshToken'] as const);
+  const missing = required.filter((k) => !profile[k]);
   if (missing.length > 0) {
     const flag = { tenant: '--tenant', clientId: '--client-id', clientSecret: '--client-secret', refreshToken: '--refresh-token' };
-    throw new CliError('usage', `Missing ${missing.map((k) => flag[k]).join(', ')}.`, { hint: 'Pass them as flags, use --from-env, or run `asor login` in an interactive terminal.' });
+    throw new CliError('usage', `Missing ${missing.map((k) => flag[k]).join(', ')}.`, {
+      hint: authorize ? 'Pass them as flags or run `asor login --authorize` in an interactive terminal.' : 'Pass them as flags, use --from-env, run `asor login` in an interactive terminal, or use --authorize to sign in through the browser.',
+    });
   }
 
-  saveProfile(name, profile, { makeDefault: Boolean(values.default) });
-  stderr(`Saved profile "${name}" to ${configPath()}.`);
+  if (authorize) {
+    const ttlFlag = values['refresh-ttl-days'] === undefined ? undefined : Number(values['refresh-ttl-days']);
+    if (ttlFlag !== undefined && !(ttlFlag > 0)) throw new CliError('usage', `Invalid --refresh-ttl-days "${values['refresh-ttl-days']}".`);
+    const authorizeUrl = values['authorize-url'] ?? existing.authorizeUrl ?? authorizeUrlFor(profile.host, profile.tenant!);
+    const redirectUri = values['redirect-uri'] ?? existing.redirectUri ?? DEFAULT_REDIRECT_URI;
+    const tokenUrl = profile.tokenUrl ?? `${normalizeOrigin(profile.host)}/auth/oauth2/${encodeURIComponent(profile.tenant!)}/token`;
+    if (!isLoopbackRedirect(redirectUri) && !values.paste) stderr(`Redirect URI ${redirectUri} is not on this machine, so you will paste the address you land on.`);
+    const grant = await runAuthorizeFlow({
+      authorizeUrl,
+      tokenUrl,
+      clientId: profile.clientId!,
+      clientSecret: profile.clientSecret!,
+      redirectUri,
+      pkce: !values['no-pkce'],
+      ...(values.scope ? { scope: values.scope } : {}),
+      open: !values['no-open'],
+      paste: Boolean(values.paste),
+      log: (m) => stderr(m),
+      readPasted: (q) => readLine(q),
+    });
+    const ttlDays = ttlFlag ?? (grant.refreshTokenExpiresIn ? Math.round(grant.refreshTokenExpiresIn / 86400) : existing.refreshTokenTtlDays);
+    Object.assign(profile, {
+      refreshToken: grant.refreshToken,
+      authMode: 'authorization_code',
+      authorizeUrl,
+      redirectUri,
+      authorizedAt: new Date().toISOString(),
+      ...(ttlDays ? { refreshTokenTtlDays: ttlDays } : {}),
+    } satisfies Profile);
+    saveProfile(name, profile, { makeDefault: Boolean(values.default) });
+    // Keep the access token we just got, so the next command does not need another exchange.
+    new TokenProvider(resolveConfig({ profile: name, env: configLocationEnv() })).seed(grant.accessToken, grant.expiresIn);
+    stderr(`Authorized. Saved profile "${name}" to ${configPath()}.`);
+  } else {
+    saveProfile(name, { ...profile, authMode: existing.authMode === 'authorization_code' && !values['refresh-token'] && !env.ASOR_REFRESH_TOKEN ? 'authorization_code' : 'refresh_token' }, { makeDefault: Boolean(values.default) });
+    stderr(`Saved profile "${name}" to ${configPath()}.`);
+  }
   if (values['no-verify']) return ExitCode.OK;
 
   const verified = await verifySavedProfile(name);
@@ -272,6 +338,18 @@ function cmdProfiles(args: string[]): number {
   return ExitCode.OK;
 }
 
+/** "authorization code, signed in 3 days ago; expires in ~27 days" — so bots can be re-authorized before they break. */
+function authSummary(cfg: ReturnType<typeof resolveConfig>): string {
+  if (cfg.accessToken) return 'access token from ASOR_ACCESS_TOKEN';
+  if (cfg.authMode !== 'authorization_code') return 'refresh token';
+  if (!cfg.authorizedAt) return 'authorization code';
+  const ageDays = Math.floor((Date.now() - Date.parse(cfg.authorizedAt)) / 86_400_000);
+  const age = ageDays === 0 ? 'today' : `${ageDays} day${ageDays === 1 ? '' : 's'} ago`;
+  if (!cfg.refreshTokenTtlDays) return `authorization code, signed in ${age}`;
+  const left = cfg.refreshTokenTtlDays - ageDays;
+  return `authorization code, signed in ${age}; ${left > 0 ? `refresh token expires in ~${left} day${left === 1 ? '' : 's'}` : 'refresh token has probably EXPIRED'} (re-run \`asor login --authorize\` to renew)`;
+}
+
 async function cmdWhoami(args: string[]): Promise<number> {
   const { values } = parse(args, {});
   const ctx = createContext(globals(values));
@@ -284,6 +362,7 @@ async function cmdWhoami(args: string[]): Promise<number> {
     asorBaseUrl: cfg.asorBaseUrl,
     clientId: mask(cfg.clientId),
     refreshToken: `${mask(cfg.refreshToken)} (from ${cfg.refreshTokenSource})`,
+    auth: authSummary(cfg),
     agentAuth: cfg.agentAuth,
   };
   const checks: { token: string; asor: string } = { token: 'not checked', asor: 'not checked' };
@@ -313,22 +392,28 @@ async function cmdAgents(args: string[]): Promise<number> {
   switch (sub) {
     case 'list':
     case 'ls': {
-      const { values } = parse(rest, { raw: { type: 'boolean' } });
-      if (values.help) return stdout('Usage: asor agents list [--json] [--raw]\n  --raw   with --json, print the full definitions instead of summaries'), ExitCode.OK;
+      const { values } = parse(rest, { raw: { type: 'boolean' }, redact: { type: 'boolean' } });
+      if (values.help) {
+        stdout('Usage: asor agents list [--json] [--raw] [--redact]\n  --raw     with --json, print the full definitions instead of summaries\n  --redact  with --json, replace ids, URLs, and names with placeholders (safe to share or keep as a fixture)');
+        return ExitCode.OK;
+      }
       const ctx = createContext(globals(values));
       const agents = await ctx.client.listAgents();
-      if (values.json) printJson(values.raw ? agents : agents.map(summarize));
+      if (values.json) {
+        const data = values.raw ? agents : agents.map(summarize);
+        printJson(values.redact ? redact(data) : data);
+      }
       else stdout(renderAgentList(agents.map(summarize)));
       return ExitCode.OK;
     }
     case 'get':
     case 'show': {
-      const { values, positionals } = parse(rest, {});
-      if (values.help || positionals.length === 0) return stdout('Usage: asor agents get <agent> [--json]'), positionals.length ? ExitCode.OK : ExitCode.USAGE;
+      const { values, positionals } = parse(rest, { redact: { type: 'boolean' } });
+      if (values.help || positionals.length === 0) return stdout('Usage: asor agents get <agent> [--json] [--redact]'), positionals.length ? ExitCode.OK : ExitCode.USAGE;
       const ctx = createContext(globals(values));
       const card = await resolveAgent(ctx.client, positionals.join(' '));
       const support = a2aInvoker.supports(card);
-      if (values.json) printJson(card);
+      if (values.json) printJson(values.redact ? redact(card) : card);
       else stdout(renderAgentCard(card, support.ok ? { ok: true, detail: `A2A JSON-RPC at ${support.endpoint}` } : { ok: false, detail: support.reason }));
       return ExitCode.OK;
     }

@@ -70,6 +70,12 @@ export class TokenProvider {
     return (this.current = await this.exchange());
   }
 
+  /** Primes the caches with a token obtained elsewhere (e.g. from the authorization-code exchange). */
+  seed(accessToken: string, expiresInSeconds: number): void {
+    this.current = { accessToken, expiresAt: Date.now() + expiresInSeconds * 1000, source: 'exchange' };
+    this.writeCache(this.current);
+  }
+
   async getAccessToken(): Promise<string> {
     return (await this.getToken()).accessToken;
   }
@@ -118,8 +124,11 @@ export class TokenProvider {
 
     if (!res.ok || !json.access_token) {
       const reason = json.error_description ?? json.error ?? (text.slice(0, 200) || res.statusText);
+      const reauth = `Run \`asor login --authorize --profile ${this.cfg.profileName}\` to sign in to Workday again.`;
       const hint =
-        res.status === 400 || res.status === 401
+        json.error === 'invalid_grant' && this.cfg.authMode === 'authorization_code'
+          ? `The refresh token expired or was revoked${this.cfg.refreshTokenTtlDays ? ` (this client's tokens last ${this.cfg.refreshTokenTtlDays} days)` : ''}. ${reauth}`
+          : res.status === 400 || res.status === 401
           ? 'The refresh token or client credentials were rejected. Generate a new refresh token for the integration user, check the client id/secret, and confirm the token URL (see `asor whoami`).'
           : res.status === 404
             ? 'Token endpoint not found. Check the host and tenant alias, or set ASOR_TOKEN_URL (e.g. https://{host}/ccx/oauth2/{tenant}/token).'

@@ -113,3 +113,26 @@ export function wrap(text: string, width: number, indent = ''): string {
   if (line) lines.push(indent + line);
   return lines.join('\n');
 }
+
+const SENSITIVE_KEY = /(^id$|id$|^url$|url$|uri$|email|tenant|secret|token|^name$)/i;
+
+/**
+ * Replaces identifying strings (ids, URLs, tenant fields, names) with stable placeholders and keeps the JSON's shape,
+ * so a live ASOR response can be shared in an issue or saved as a test fixture.
+ * The same input string always maps to the same placeholder, so references between fields survive.
+ */
+export function redact(value: unknown): unknown {
+  const seen = new Map<string, string>();
+  const walk = (v: unknown, key: string): unknown => {
+    if (Array.isArray(v)) return v.map((x) => walk(x, key));
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, k)]));
+    if (typeof v === 'string' && (SENSITIVE_KEY.test(key) || /^https?:\/\//i.test(v))) {
+      // Keep Workday reference-ID prefixes like "Provider=SELF-BUILT"; they are the schema, not identifying data.
+      if (/^[A-Za-z_]+=[A-Z0-9_-]+$/.test(v)) return v;
+      if (!seen.has(v)) seen.set(v, `<${key || 'value'}-${seen.size + 1}>`);
+      return seen.get(v);
+    }
+    return v;
+  };
+  return walk(value, '');
+}

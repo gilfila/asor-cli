@@ -42,7 +42,7 @@ asor ui
 
 This opens a local page in your browser, where you:
 
-1. **Connect your tenant.** Enter the host, tenant alias, API client id and secret, and a refresh token. They are saved to a local profile that only you can read, and verified against Workday.
+1. **Connect your tenant.** The simplest route is `asor login --authorize` first (browser sign-in, see [Tenant setup](#tenant-setup)); the page then picks up that profile. You can also paste a client id, secret, and refresh token into the page's connect form. Either way, credentials are saved to a local profile that only you can read, and verified against Workday.
 2. **Browse the agents registered in ASOR.** Filter by name, provider, or skill. Agents marked *callable* expose an A2A endpoint.
 3. **Try an agent** in the built-in chat before committing to it.
 4. **Generate its CLI.** Choose the command name and the folder, or tick several agents and generate them all at once.
@@ -51,7 +51,7 @@ This opens a local page in your browser, where you:
 Prefer the terminal? You get the same result without a browser:
 
 ```bash
-asor login                          # save tenant credentials
+asor login --authorize              # sign in to Workday in the browser (or: asor login to paste a refresh token)
 asor wrap                           # lists the agents; pick e.g. "1,3" or "all"
 asor wrap benefits-helper           # or name one directly → ./asor-agents/benefits-helper
 ```
@@ -124,7 +124,8 @@ The bot examples share [`examples/shared/asor-runner.mjs`](examples/shared/asor-
 |---|---|
 | `asor ui [--out dir] [--port n]` | Opens the local agent picker. It listens on 127.0.0.1 only and needs the session token in the printed URL. |
 | `asor wrap [<agent>] [--out dir] [--name cmd]` | Generates a CLI for one agent. With no `<agent>`, you pick from a list. The alias is `asor generate`. |
-| `asor login [--profile p]` | Saves credentials to a profile that only you can read, then verifies it. `--from-env` imports the `ASOR_*` variables. |
+| `asor login --authorize [--profile p]` | Signs in to Workday in the browser (Authorization Code + PKCE), saves the refresh token, and verifies it. |
+| `asor login [--profile p]` | Saves a pasted refresh token instead. `--from-env` imports the `ASOR_*` variables. |
 | `asor whoami` | Shows the resolved config with secrets masked, then tests the token exchange and an ASOR call. The errors include fix-it hints. |
 | `asor profiles` / `asor logout` | Lists or deletes saved profiles. |
 | `asor agents list` / `get <agent>` | Lists the registered agents, or shows one definition with its skills. |
@@ -135,27 +136,55 @@ The bot examples share [`examples/shared/asor-runner.mjs`](examples/shared/asor-
 
 ## Tenant setup
 
-`asor` authenticates with the OAuth 2.0 **refresh-token grant** against your tenant's agent host.
+`asor` calls the ASOR API **directly** on your tenant's agent host. It does not go through Orchestrate.
 
 | Setting | Default |
 |---|---|
 | Host | `us.agent.workday.com`. Use your data center's agent host. |
+| Authorize URL | `https://{host}/auth/authorize/{tenant}` |
 | Token URL | `https://{host}/auth/oauth2/{tenant}/token` |
 | ASOR API | `https://{host}/asor/v1` |
 | Tenant header | `wd-agent-tenant-alias: {tenant}` |
 
-To prepare the tenant (task names vary slightly by release):
+### Recommended: sign in with the browser (Authorization Code grant)
 
-1. **Create an integration user.** Create an Integration System User (or Agent Service User) for the bot. Put it in a security group that has:
-   - **Setup: Agents** (View) to list and get agents,
-   - **Development**, only if you will use `agents register`.
-2. **Register an API client.** Register an API client for integrations with the **Agent System of Record** scope. Also add any functional-area scopes your agents' Workday tools need.
-3. **Issue a refresh token.** Issue one for the integration user under *Manage Refresh Tokens for Integrations*.
-4. **Log in.** Run `asor login` with the tenant alias, client id, client secret, and refresh token, then run `asor whoami`.
+ASOR-scoped API clients use the Authorization Code grant, so `asor` signs in the same way a web app does. Task names vary slightly by release.
 
-If your tenant uses a different token endpoint, such as the classic `https://{host}/ccx/oauth2/{tenant}/token`, set `--token-url` or `ASOR_TOKEN_URL`. If you already have an access token from elsewhere, set `ASOR_ACCESS_TOKEN` to skip the exchange.
+1. **Check permissions.** The user who will authorize needs **Setup: Agents** (View) to list and get agents, plus **Development** if you will use `agents register`. The Agents functional area must be enabled.
+2. **Register an API client** (*Register API Client*):
+   - **Grant type:** Authorization Code.
+   - **Access token type:** Bearer.
+   - **Redirection URI:** `http://localhost:8765/callback`. asor receives it automatically. If your tenant only accepts HTTPS callbacks, use `https://cb.myworkday.com/cb1` and paste the address when asked.
+   - **Refresh token timeout:** 30 days, or whatever your policy allows.
+   - **Scope:** **Agent System of Record**.
+   - **Include Workday Owned Scope:** Yes.
+3. **Sign in** with the command below. It opens Workday in your browser. Sign in, check that the consent screen lists the ASOR access you expect, and click **Allow**. asor then exchanges the code (with PKCE), saves the refresh token to your profile, and verifies it with a live ASOR call.
 
-If Workday **rotates** the refresh token, `asor` saves the new one to your profile. When the token came from `ASOR_REFRESH_TOKEN`, the new one can't be saved, so asor prints a warning and you have to update the secret yourself.
+   ```bash
+   asor login --authorize --profile prod --tenant <alias> --refresh-ttl-days 30
+   ```
+4. **Check it** with `asor whoami`. It shows when you signed in and roughly when the refresh token expires. When it expires, run `asor login --authorize` again. Everything else in the profile is kept.
+
+Useful flags:
+
+| Flag | Use it when |
+|---|---|
+| `--redirect-uri <uri>` | You registered a different callback. It must match the client exactly. |
+| `--paste` | You want to paste the landing address even for a localhost callback. |
+| `--no-pkce` | Your tenant rejects the PKCE challenge. |
+| `--authorize-url <url>` | Your authorize endpoint differs from the default. |
+
+### Alternative: an existing refresh token
+
+If you already have a refresh token (for example from *Manage Refresh Tokens for Integrations* on an integration system user), run plain `asor login` and paste it, or set `ASOR_REFRESH_TOKEN`.
+
+If your tenant uses a different token endpoint, such as the classic `https://{host}/ccx/oauth2/{tenant}/token`, set `--token-url` or `ASOR_TOKEN_URL`. To skip the exchange entirely, set `ASOR_ACCESS_TOKEN`.
+
+### Refresh tokens on bot hosts
+
+If Workday **rotates** the refresh token, `asor` saves the new one to your profile. When the token came from `ASOR_REFRESH_TOKEN` instead, the new one can't be saved, so asor prints a warning and you have to update the secret yourself.
+
+Refresh tokens from the browser sign-in also **expire** (30 days by default). When that happens a bot gets exit code 3 with a "sign in again" hint. Plan a periodic `asor login --authorize` on the machine that holds the profile, or give the bot host a fresh `ASOR_REFRESH_TOKEN`.
 
 ### Environment variables
 

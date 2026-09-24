@@ -31,3 +31,20 @@ export async function readStdin(): Promise<string> {
   for await (const chunk of process.stdin) chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
   return Buffer.concat(chunks).toString('utf8');
 }
+
+/** Reads one line: a prompt on a terminal, or the next line of piped stdin (so scripted logins and tests work). */
+export async function readLine(question: string): Promise<string> {
+  if (process.stdin.isTTY) return ask(question);
+  process.stderr.write(`${question}: `);
+  const rl = createInterface({ input: process.stdin, terminal: false });
+  try {
+    const line = await new Promise<string>((resolve) => {
+      rl.once('line', resolve);
+      rl.once('close', () => resolve(''));
+    });
+    process.stderr.write('\n');
+    return line.trim();
+  } finally {
+    rl.close();
+  }
+}

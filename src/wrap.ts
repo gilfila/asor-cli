@@ -98,7 +98,7 @@ process.exitCode = await runWrapped(process.argv.slice(2), AGENT);
 }
 
 /** Only the generator, the web UI, and the asor router stay out of generated CLIs; they need none of them. */
-const NOT_VENDORED = new Set(['ui', 'cli.js', 'wrap.js', 'index.js']);
+const NOT_VENDORED = new Set(['ui', 'cli.js', 'wrap.js', 'index.js', 'oauth.js', 'open.js']);
 
 function runtimeFiles(dir: string, base = dir): string[] {
   const out: string[] = [];

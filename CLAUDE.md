@@ -75,6 +75,10 @@ The UI was verified visually in both light and dark mode against the mock tenant
 
 **Also:** the README was reframed with a screenshot at `docs/asor-ui.png`, the version is 0.2.0, and there are 54 green tests.
 
+**Phase 0 of the live-tenant rollout is done (2026-09-24).** `asor login --authorize` now exists (Authorization Code + PKCE, localhost callback or paste mode). whoami shows when the refresh token expires, `--redact` was added, and 66 tests pass. `asor` is `npm link`ed on Tony's PC. **Next:** Phase 1, where Tony signs in to `wday_wcpdev8` in the browser pane.
+
+**The live-tenant rollout (direct ASOR, no Orchestrate).** The checklist is in `LIVE_TENANT_PLAN.md`. It is gitignored because it names the tenant. Tick it as you go.
+
 **Open (carried over):**
 - **Never run against a real tenant.** Next step: `asor login`, then `asor whoami`, then `asor ui`. The known 401 blocker is in `hive/buzz-workday-asor/LIVE_SETUP_PROGRESS.md`. Things to confirm:
   - the list shape,
