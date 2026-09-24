@@ -17,7 +17,7 @@ This is an open-source tool, public at **github.com/gilfila/asor-cli**, that **g
 ## Run / Build / Test
 ```bash
 npm install          # also builds (prepare)
-npm test             # clean + build + node --test dist/test/**/*.test.js  (54 tests)
+npm test             # clean + build + node --test dist/test/**/*.test.js  (66 tests)
 npm run build && node dist/src/cli.js ui   # the picker (needs ASOR_* or a saved profile; npm run mock for a fake tenant)
 npm run mock         # fake tenant on :4010; prints the ASOR_* env to export
 node examples/shared/demo.mjs   # bot-runner end-to-end against the mock
