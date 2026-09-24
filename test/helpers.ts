@@ -17,10 +17,10 @@ export function tempDir(prefix = 'asor-test-'): string {
 }
 
 /** Runs a script with a clean ASOR_* environment. Stdin is always a pipe (closed after `input`). */
-export function run(script: string, args: string[], opts: { env?: Record<string, string>; input?: string } = {}): Promise<RunResult> {
+export function run(script: string, args: string[], opts: { env?: Record<string, string>; input?: string; cwd?: string } = {}): Promise<RunResult> {
   const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('ASOR_')));
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [script, ...args], { env: { ...base, ...opts.env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [script, ...args], { env: { ...base, ...opts.env }, stdio: ['pipe', 'pipe', 'pipe'], ...(opts.cwd ? { cwd: opts.cwd } : {}) });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d));
@@ -31,6 +31,6 @@ export function run(script: string, args: string[], opts: { env?: Record<string,
   });
 }
 
-export function runCli(args: string[], opts: { env?: Record<string, string>; input?: string } = {}): Promise<RunResult> {
+export function runCli(args: string[], opts: { env?: Record<string, string>; input?: string; cwd?: string } = {}): Promise<RunResult> {
   return run(CLI, args, opts);
 }

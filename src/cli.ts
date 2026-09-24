@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
 import { TokenProvider } from './auth.js';
 import { configPath, DEFAULT_HOST, DEFAULT_PROFILE, mask, readConfigFile, removeProfile, resolveConfig, saveProfile, type Profile } from './config.js';
-import { createContext, reportError, stderr, stdout, type GlobalFlags } from './context.js';
+import { createContext, reportError, stderr, stdout, verifySavedProfile, type GlobalFlags } from './context.js';
 import { CliError, ExitCode, toCliError } from './errors.js';
 import { a2aInvoker } from './invoke.js';
 import { renderAgentCard, renderAgentList, renderTable } from './output.js';
@@ -13,11 +14,15 @@ import { resolveAgent } from './resolve.js';
 import { runInvoke } from './run-invoke.js';
 import { summarize, type AgentCard } from './types.js';
 import { VERSION } from './version.js';
-import { generateWrapper } from './wrap.js';
+import { commandName, generateWrapper, surfaceSnippets } from './wrap.js';
 
-const HELP = `asor ${VERSION} — use Workday ASOR agents from the command line
+const HELP = `asor ${VERSION} — turn Workday ASOR agents into their own CLIs
 
-Usage:
+Generate a CLI per agent:
+  asor ui                               Open the agent picker in your browser: browse, try, generate
+  asor wrap [<agent>] [--out <dir>]     Generate a CLI for one agent (no <agent>: pick from a list)
+
+Set up and explore:
   asor login [--profile <name>]         Save tenant credentials (prompts for anything missing)
   asor whoami                           Show the active profile and test the connection
   asor profiles                         List saved profiles
@@ -25,8 +30,7 @@ Usage:
   asor agents list                      List agents registered in the tenant's ASOR
   asor agents get <agent>               Show one agent's definition and skills
   asor agents register --file <card>    Register or update an agent from an A2A agent-card JSON file
-  asor invoke <agent> [message]         Send a message to an agent (reads stdin when no message is given)
-  asor wrap <agent> --out <dir>         Generate a standalone CLI for one agent (for Slack, Teams, Claude, ...)
+  asor invoke <agent> [message]         Send a message to any agent (reads stdin when no message is given)
 
 <agent> is an id, a name, a slug like "benefits-helper", or a unique part of a name.
 
@@ -82,9 +86,12 @@ Options:
   --no-verify             Save without testing the credentials
 `;
 
-const HELP_WRAP = `Usage: asor wrap <agent> --out <dir> [--name <command>] [--force]
+const HELP_WRAP = `Usage: asor wrap [<agent>] [--out <dir>] [--name <command>] [--force]
+       (alias: asor generate)
 
-Generates a self-contained CLI package for one agent. It has no dependencies (only Node >= 22) and contains:
+Generates a self-contained CLI package for one agent. Without <agent>, it lists the tenant's agents and lets you
+pick one or more. The default output folder is ./asor-agents/<command>.
+The package has no dependencies (only Node >= 22) and contains:
   bin/<command>.js   the CLI, pinned to this agent:  <command> ask "..."  |  <command> info
   tool.json          a function-calling tool definition for LLM-driven bots
   SKILL.md           instructions an agent like Claude Code can load as a skill
@@ -92,6 +99,18 @@ Generates a self-contained CLI package for one agent. It has no dependencies (on
   agent-card.json    the definition snapshot it was generated from
 
 The wrapped CLI reads the same ASOR_* variables and saved profiles as asor.
+`;
+
+const HELP_UI = `Usage: asor ui [--port <n>] [--out <dir>] [--no-open]
+
+Opens a local web page to connect a tenant, browse its ASOR agents, try them, and generate a CLI for each one.
+It listens only on 127.0.0.1, and every request needs the session token in the printed URL.
+
+Options:
+  --port <n>     Port to listen on (default: a random free port)
+  --out <dir>    Parent folder for generated CLIs (default ./asor-agents)
+  --no-open      Print the URL without opening a browser
+  --profile <p>  Profile to start with
 `;
 
 const globalOptions = {
@@ -152,7 +171,10 @@ export async function main(argv: string[]): Promise<number> {
       case 'ask':
         return await cmdInvoke(rest);
       case 'wrap':
+      case 'generate':
         return await cmdWrap(rest);
+      case 'ui':
+        return await cmdUi(rest);
       default:
         throw new CliError('usage', `Unknown command "${command}".`, { hint: 'Run `asor --help` to see the commands.' });
     }
@@ -214,12 +236,9 @@ async function cmdLogin(args: string[]): Promise<number> {
   stderr(`Saved profile "${name}" to ${configPath()}.`);
   if (values['no-verify']) return ExitCode.OK;
 
-  const ctx = createContext(globals(values, { profile: name }));
-  ctx.tokens.invalidate();
-  await ctx.tokens.getToken({ forceRefresh: true });
-  const agents = await ctx.client.listAgents();
-  stderr(`Connected to tenant "${ctx.cfg.tenant}". ${agents.length} agent(s) visible.`);
-  if (values.json) printJson({ ok: true, profile: name, tenant: ctx.cfg.tenant, agents: agents.length });
+  const verified = await verifySavedProfile(name);
+  stderr(`Connected to tenant "${verified.tenant}". ${verified.agents} agent(s) visible.`);
+  if (values.json) printJson({ ok: true, profile: name, tenant: verified.tenant, agents: verified.agents });
   return ExitCode.OK;
 }
 
@@ -366,19 +385,85 @@ async function cmdInvoke(args: string[]): Promise<number> {
 async function cmdWrap(args: string[]): Promise<number> {
   const { values, positionals } = parse(args, { out: { type: 'string', short: 'o' }, name: { type: 'string' }, force: { type: 'boolean' } });
   if (values.help) return stdout(HELP_WRAP), ExitCode.OK;
-  const ref = positionals.join(' ');
-  if (!ref || !values.out) throw new CliError('usage', 'Usage: asor wrap <agent> --out <dir> [--name <command>]');
   const ctx = createContext(globals(values));
-  const card = await resolveAgent(ctx.client, ref);
-  const support = a2aInvoker.supports(card);
-  if (!support.ok) stderr(`asor: warning: this agent is not invocable yet (${support.reason}). The wrapper is generated anyway.`);
-  const result = generateWrapper(card, { outDir: values.out, force: Boolean(values.force), ...(values.name ? { command: values.name } : {}), ...(values.profile ? { profile: values.profile } : {}) });
-  if (values.json) printJson(result);
-  else {
-    stdout(`Wrapped "${card.name}" as \`${result.command}\` in ${result.outDir}`);
-    stdout(`  try:      node ${result.binPath} info`);
-    stdout(`  install:  npm install -g ${result.outDir}    (then: ${result.command} ask "hello")`);
+
+  let cards: AgentCard[];
+  const ref = positionals.join(' ');
+  if (ref) cards = [await resolveAgent(ctx.client, ref)];
+  else if (process.stdin.isTTY && !values.json) cards = await pickAgents(ctx);
+  else throw new CliError('usage', 'Missing <agent>.', { hint: 'Usage: asor wrap <agent> [--out <dir>]. Run it in a terminal without <agent> to pick from a list, or use `asor ui`.' });
+  if (cards.length > 1 && (values.out || values.name)) {
+    throw new CliError('usage', '--out and --name apply to a single agent.', { hint: 'Leave them off to generate each CLI under ./asor-agents/<command>.' });
   }
+
+  const results = [];
+  for (const card of cards) {
+    const support = a2aInvoker.supports(card);
+    if (!support.ok) stderr(`asor: warning: "${card.name}" is not invocable yet (${support.reason}). Generating its CLI anyway.`);
+    const command = commandName(card, values.name);
+    const outDir = values.out ?? join('asor-agents', command);
+    const result = generateWrapper(card, { outDir, command, force: Boolean(values.force), ...(values.profile ? { profile: values.profile } : {}) });
+    results.push(result);
+    if (!values.json) {
+      stdout(`\n✓ ${card.name}  →  ${result.command}   (${result.outDir})`);
+      const shown = surfaceSnippets(result, { tenant: ctx.cfg.tenant, ...(values.profile ? { profile: values.profile } : {}) }).filter((x) => ['Install', 'Terminal / scripts', 'Claude Code'].includes(x.surface));
+      for (const snip of shown) {
+        stdout(`  ${snip.surface}:`);
+        stdout(snip.code.split('\n').map((l) => `    ${l}`).join('\n'));
+      }
+    }
+  }
+  if (values.json) printJson(results.length === 1 ? results[0] : results);
+  else stdout('\nMore recipes (Slack, Teams, LLM tools) are in README.md in each folder, or run `asor ui`.');
+  return ExitCode.OK;
+}
+
+/** Numbered terminal picker for `asor wrap` with no agent. Accepts "2", "1,3", "1-3", or "all". */
+async function pickAgents(ctx: ReturnType<typeof createContext>): Promise<AgentCard[]> {
+  const agents = await ctx.client.listAgents();
+  if (agents.length === 0) throw new CliError('not_found', 'No agents are registered in this tenant (or this user cannot see any).');
+  stderr(`Agents in ${ctx.cfg.tenant}:`);
+  agents.forEach((a, i) => {
+    const s = summarize(a);
+    stderr(`  ${String(i + 1).padStart(2)}. ${s.name}${s.invocable ? '' : '  (no endpoint)'}${s.skills.length ? `  — ${s.skills.join(', ')}` : ''}`);
+  });
+  const answer = (await ask('Generate CLIs for which agents? (e.g. 2, 1,3, 1-3, all)')).toLowerCase();
+  const picked = new Set<number>();
+  for (const part of answer.split(/[\s,]+/).filter(Boolean)) {
+    if (part === 'all') agents.forEach((_, i) => picked.add(i));
+    else if (/^\d+-\d+$/.test(part)) {
+      const [a, b] = part.split('-').map(Number) as [number, number];
+      for (let i = Math.min(a, b); i <= Math.max(a, b); i++) picked.add(i - 1);
+    } else if (/^\d+$/.test(part)) picked.add(Number(part) - 1);
+    else throw new CliError('usage', `Did not understand "${part}".`);
+  }
+  const chosen = [...picked].sort((x, y) => x - y).map((i) => agents[i]);
+  if (chosen.length === 0 || chosen.some((c) => !c)) throw new CliError('usage', 'Pick numbers from the list.');
+  // List entries can be partial; fetch each full definition.
+  return Promise.all(chosen.map((c) => (c!.id ? ctx.client.getAgent(c!.id).catch(() => c!) : c!)));
+}
+
+async function cmdUi(args: string[]): Promise<number> {
+  const { values } = parse(args, { port: { type: 'string' }, out: { type: 'string', short: 'o' }, 'no-open': { type: 'boolean' } });
+  if (values.help) return stdout(HELP_UI), ExitCode.OK;
+  const port = values.port === undefined ? 0 : Number(values.port);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new CliError('usage', `Invalid --port "${values.port}".`);
+  const { startUi } = await import('./ui/server.js');
+  const ui = await startUi({
+    port,
+    open: !values['no-open'],
+    ...(values.profile ? { profile: values.profile } : {}),
+    ...(values.out ? { outRoot: values.out } : {}),
+    log: (m) => stderr(`asor ui: ${m}`),
+  });
+  stdout(`asor ui is running at:\n\n  ${ui.url}\n\nThe link contains a session token, so don't share it. Press Ctrl+C to stop.`);
+  await new Promise<void>((done) => {
+    const stop = () => {
+      void ui.close().then(done);
+    };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  });
   return ExitCode.OK;
 }
 

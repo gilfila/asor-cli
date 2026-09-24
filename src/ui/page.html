@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>asor · Agent CLI Builder</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f766e'/%3E%3Cpath d='M9 11l5 5-5 5M16 21h7' stroke='white' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f1f3f6; --line: #e3e6eb; --line-strong: #cfd4dc;
+  --text: #16191f; --muted: #5d6573; --faint: #8a92a0;
+  --accent: #0f766e; --accent-ink: #ffffff; --accent-soft: #e3f3f1; --accent-line: #9fd6cf;
+  --warn: #9a5b00; --warn-soft: #fdf2e0; --bad: #b42318; --bad-soft: #fdecea; --good: #067647; --good-soft: #e5f6ec;
+  --code-bg: #0f1419; --code-text: #e6edf3; --code-muted: #8b98a5;
+  --radius: 10px; --radius-sm: 7px;
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Inter, Roboto, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1014; --panel: #151a20; --panel-2: #1b2129; --line: #252c36; --line-strong: #323b47;
+    --text: #e8ebef; --muted: #a0a9b6; --faint: #6f7987;
+    --accent: #2dd4bf; --accent-ink: #062b27; --accent-soft: #11302d; --accent-line: #1f5f58;
+    --warn: #f5b454; --warn-soft: #2e2413; --bad: #f97066; --bad-soft: #3a1714; --good: #47cd89; --good-soft: #10291c;
+    --code-bg: #0a0d11; --shadow: none; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; }
+code, .mono { font-family: var(--mono); font-size: .92em; }
+h1, h2, h3 { margin: 0; line-height: 1.25; }
+[hidden] { display: none !important; }
+
+/* top bar */
+.top { height: 56px; display: flex; align-items: center; gap: 16px; padding: 0 20px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; }
+.brand-mark { width: 26px; height: 26px; border-radius: 7px; background: var(--accent); display: grid; place-items: center; }
+.brand small { font-weight: 450; color: var(--muted); }
+.spacer { flex: 1; }
+.tenant { display: flex; align-items: center; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+.dot.on { background: var(--good); } .dot.off { background: var(--bad); }
+
+/* controls */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); background: var(--panel); cursor: pointer; font-weight: 550; white-space: nowrap; }
+.btn:hover { background: var(--panel-2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.btn.ghost:hover { background: var(--panel-2); color: var(--text); }
+.btn.sm { height: 28px; padding: 0 10px; font-size: 13px; }
+.btn:disabled { opacity: .55; cursor: default; filter: none; }
+.btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, .agent:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input[type=text], input[type=password], select, textarea { width: 100%; height: 36px; padding: 0 11px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); background: var(--panel); }
+textarea { height: auto; min-height: 76px; padding: 9px 11px; resize: vertical; }
+select { padding-right: 28px; }
+label.field { display: grid; gap: 5px; font-size: 13px; font-weight: 550; }
+label.field .hint { font-weight: 400; color: var(--faint); font-size: 12px; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.check input { width: 15px; height: 15px; accent-color: var(--accent); margin: 0; }
+
+/* layout */
+.layout { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; height: calc(100vh - 56px); }
+.list-pane { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.list-head { padding: 16px 16px 12px; display: grid; gap: 10px; border-bottom: 1px solid var(--line); }
+.list-head h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.count { font-variant-numeric: tabular-nums; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; font-size: 11.5px; letter-spacing: 0; }
+.agents { list-style: none; margin: 0; padding: 6px; overflow: auto; flex: 1; }
+.agent { display: grid; grid-template-columns: 18px 1fr; gap: 10px; padding: 10px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
+.agent:hover { background: var(--panel-2); }
+.agent.active { background: var(--accent-soft); border-color: var(--accent-line); }
+.agent input { margin-top: 3px; width: 15px; height: 15px; accent-color: var(--accent); }
+.agent-name { font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.agent-name span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-meta { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
+.tag.ok { background: var(--good-soft); color: var(--good); }
+.tag.no { background: var(--warn-soft); color: var(--warn); }
+.batch { border-top: 1px solid var(--line); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--panel); }
+.list-state { padding: 28px 18px; color: var(--muted); text-align: center; }
+
+.detail-pane { overflow: auto; min-height: 0; }
+.detail { max-width: 920px; margin: 0 auto; padding: 28px 32px 64px; display: grid; gap: 20px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+.card-head { padding: 16px 20px; border-bottom: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.card-head h3 { font-size: 15px; font-weight: 650; }
+.card-head p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.card-body { padding: 18px 20px; display: grid; gap: 16px; }
+
+.agent-title { display: grid; gap: 10px; }
+.agent-title h1 { font-size: 24px; letter-spacing: -.02em; font-weight: 700; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.agent-title .desc { color: var(--muted); margin: 0; max-width: 70ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); font-size: 13px; }
+.facts b { color: var(--text); font-weight: 550; }
+.skills { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.skill { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel-2); }
+.skill b { display: block; font-size: 13.5px; }
+.skill code { color: var(--faint); font-size: 11.5px; }
+.skill p { margin: 4px 0 0; color: var(--muted); font-size: 12.5px; }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.preview { font-family: var(--mono); font-size: 13px; background: var(--code-bg); color: var(--code-text); padding: 10px 14px; border-radius: var(--radius-sm); overflow-x: auto; white-space: pre; }
+.preview .p { color: var(--code-muted); user-select: none; }
+
+.notice { padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; border: 1px solid; }
+.notice.warn { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.notice.bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
+.notice.good { background: var(--good-soft); color: var(--good); border-color: transparent; }
+.notice small { display: block; opacity: .85; margin-top: 2px; }
+
+.result-head { display: flex; align-items: flex-start; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.result-head > div:first-child { min-width: 0; flex: 1 1 320px; }
+/* Grid and flex children default to min-width:auto, which lets long paths and code push the page sideways. */
+.detail > *, .card-body > *, .snippet > *, .code { min-width: 0; }
+.detail-pane { overflow-x: hidden; }
+.result-head h3 { font-size: 15px; }
+.path { font-family: var(--mono); font-size: 12.5px; color: var(--muted); word-break: break-all; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); }
+.tab { border: 0; background: none; padding: 9px 12px; cursor: pointer; color: var(--muted); font-weight: 550; font-size: 13px; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tab[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+.snippet { display: grid; gap: 8px; }
+.snippet p { margin: 0; color: var(--muted); font-size: 13px; }
+.code { position: relative; }
+.code pre { margin: 0; background: var(--code-bg); color: var(--code-text); padding: 14px 76px 14px 16px; border-radius: var(--radius-sm); font: 12.5px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.code .copy { position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); color: var(--code-text); }
+.code .copy:hover { background: rgba(255,255,255,.16); }
+.files { display: flex; flex-wrap: wrap; gap: 6px; }
+.files code { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 7px; font-size: 12px; }
+
+.chat { display: grid; gap: 10px; max-height: 360px; overflow: auto; }
+.msg { padding: 9px 13px; border-radius: 10px; max-width: 85%; white-space: pre-wrap; word-wrap: break-word; }
+.msg.from-user { background: var(--accent-soft); justify-self: end; }
+.msg.from-agent { background: var(--panel-2); border: 1px solid var(--line); }
+.msg.from-err { background: var(--bad-soft); color: var(--bad); }
+.msg .meta { display: block; font-size: 11.5px; color: var(--faint); margin-top: 4px; }
+
+.empty { max-width: 640px; margin: 8vh auto 0; padding: 0 32px; display: grid; gap: 22px; }
+.empty h1 { font-size: 26px; letter-spacing: -.02em; }
+.empty p { color: var(--muted); margin: 0; }
+.steps { display: grid; gap: 10px; counter-reset: s; padding: 0; margin: 0; list-style: none; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 28px 1fr; gap: 12px; align-items: start; }
+.steps li::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 13px; }
+.steps b { display: block; }
+.steps span { color: var(--muted); font-size: 13px; }
+
+dialog { border: 1px solid var(--line); border-radius: 14px; padding: 0; width: min(520px, calc(100vw - 32px)); background: var(--panel); color: var(--text); box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+dialog::backdrop { background: rgba(10,14,20,.45); }
+.dialog-body { padding: 20px 22px; display: grid; gap: 14px; }
+.dialog-foot { padding: 14px 22px; border-top: 1px solid var(--line); display: flex; justify-content: flex-end; gap: 8px; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; z-index: 20; }
+.spin { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }
+
+@media (max-width: 820px) {
+  .layout { grid-template-columns: 1fr; height: auto; }
+  .list-pane { border-right: 0; border-bottom: 1px solid var(--line); max-height: 45vh; }
+  .detail { padding: 20px 16px 48px; }
+  .grid2 { grid-template-columns: 1fr; }
+  .top { padding: 0 12px; gap: 8px; }
+  .brand small { display: none; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <div class="brand-mark" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 32 32"><path d="M9 11l5 5-5 5M16 21h7" stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    asor <small>Agent CLI Builder</small>
+  </div>
+  <div class="spacer"></div>
+  <div class="tenant">
+    <select id="profileSelect" aria-label="Profile" hidden style="width:auto;height:30px;font-size:13px"></select>
+    <span class="pill" id="tenantPill"><span class="dot" id="tenantDot"></span><span id="tenantText">Checking…</span></span>
+    <button class="btn sm" id="connectBtn" type="button">Connect tenant</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="list-pane" aria-label="Registered agents">
+    <div class="list-head">
+      <h2>ASOR agents <span class="count" id="agentCount">0</span>
+        <span class="spacer"></span>
+        <button class="btn ghost sm" id="refreshBtn" type="button" title="Reload agents from ASOR">Refresh</button></h2>
+      <input type="text" id="search" placeholder="Filter by name, provider, or skill" aria-label="Filter agents">
+      <label class="check"><input type="checkbox" id="onlyInvocable"> Only agents with a callable endpoint</label>
+    </div>
+    <div class="list-state" id="listState">Loading agents…</div>
+    <ul class="agents" id="agentList"></ul>
+    <div class="batch" id="batchBar" hidden>
+      <span id="batchText">0 selected</span>
+      <div class="row">
+        <button class="btn ghost sm" id="clearSel" type="button">Clear</button>
+        <button class="btn primary sm" id="batchBtn" type="button">Generate CLIs</button>
+      </div>
+    </div>
+  </aside>
+
+  <section class="detail-pane" id="detailPane" aria-live="polite"></section>
+</main>
+
+<dialog id="loginDialog">
+  <form method="dialog" id="loginForm">
+    <div class="card-head" style="border-radius:14px 14px 0 0">
+      <div><h3>Connect a Workday tenant</h3><p>Saved to your local asor profile (readable only by you). Secrets never leave this machine except to Workday.</p></div>
+    </div>
+    <div class="dialog-body">
+      <div class="grid2">
+        <label class="field">Profile name <input type="text" name="profile" value="default" required></label>
+        <label class="field">Tenant alias <input type="text" name="tenant" placeholder="acme_prod" required></label>
+      </div>
+      <label class="field">Agent host <span class="hint">Your data center's Workday agent host</span><input type="text" name="host" value="us.agent.workday.com"></label>
+      <div class="grid2">
+        <label class="field">API client id <input type="text" name="clientId" autocomplete="off" required></label>
+        <label class="field">API client secret <input type="password" name="clientSecret" autocomplete="off" required></label>
+      </div>
+      <label class="field">Refresh token <span class="hint">Issued for the integration user under Manage Refresh Tokens for Integrations</span><input type="password" name="refreshToken" autocomplete="off" required></label>
+      <details><summary style="cursor:pointer;color:var(--muted);font-size:13px">Advanced</summary>
+        <div style="display:grid;gap:12px;margin-top:12px">
+          <label class="field">Token URL override <span class="hint">Default: https://{host}/auth/oauth2/{tenant}/token</span><input type="text" name="tokenUrl" placeholder="https://…/ccx/oauth2/{tenant}/token"></label>
+          <label class="check"><input type="checkbox" name="makeDefault" checked> Make this the default profile</label>
+        </div>
+      </details>
+      <div id="loginError"></div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+      <button class="btn primary" id="loginSubmit" type="button">Save &amp; verify</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+(() => {
+  'use strict';
+  const TOKEN = new URLSearchParams(location.search).get('t') || '';
+  // Keep the session token out of the address bar, bookmarks, and screenshots.
+  history.replaceState(null, '', location.pathname);
+
+  const state = { status: null, profile: null, agents: [], selected: null, checked: new Set(), detail: null, chat: { contextId: null, taskId: null, log: [] }, results: {} };
+  const $ = (id) => document.getElementById(id);
+
+  // Element builder. Everything from the tenant goes through textContent, never innerHTML.
+  function h(tag, props, ...children) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') el.className = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else if (k === 'style') el.setAttribute('style', v);
+      else if (k in el && typeof v !== 'string') el[k] = v;
+      else el.setAttribute(k, v === true ? '' : v);
+    }
+    for (const c of children.flat()) if (c != null && c !== false) el.append(c instanceof Node ? c : document.createTextNode(String(c)));
+    return el;
+  }
+
+  async function api(method, path, body) {
+    const res = await fetch(path, { method, headers: Object.assign({ 'x-asor-token': TOKEN }, body ? { 'content-type': 'application/json' } : {}), body: body ? JSON.stringify(body) : undefined });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* non-JSON */ }
+    if (!res.ok) throw (data && data.error) || { message: 'Request failed (HTTP ' + res.status + ')' };
+    return data;
+  }
+  const withProfile = (path) => state.profile ? path + (path.includes('?') ? '&' : '?') + 'profile=' + encodeURIComponent(state.profile) : path;
+
+  function toast(text) {
+    const t = h('div', { class: 'toast', role: 'status' }, text);
+    document.body.append(t);
+    setTimeout(() => t.remove(), 1800);
+  }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); toast('Copied'); } catch (e) { toast('Copy failed — select the text instead'); }
+  }
+  function errorNotice(err) {
+    return h('div', { class: 'notice bad', role: 'alert' }, (err && err.message) || String(err), err && err.hint ? h('small', null, err.hint) : null);
+  }
+  function busy(btn, on, label) {
+    if (on) { btn.dataset.label = btn.textContent; btn.disabled = true; btn.replaceChildren(h('span', { class: 'spin', 'aria-hidden': 'true' }), label || 'Working…'); }
+    else { btn.disabled = false; btn.textContent = btn.dataset.label || label; }
+  }
+
+  // ---------- tenant status ----------
+  async function loadStatus() {
+    state.status = await api('GET', withProfile('/api/status'));
+    const s = state.status;
+    // Only pin a profile that is actually saved; env-only configs resolve without one.
+    state.profile = s.configured && s.profileSaved ? s.profile : null;
+    $('tenantDot').className = 'dot ' + (s.configured ? 'on' : 'off');
+    $('tenantText').textContent = s.configured ? s.tenant + ' · ' + s.host.replace(/^https?:\/\//, '') : 'Not connected';
+    const sel = $('profileSelect');
+    sel.replaceChildren(...s.profiles.map((p) => h('option', { value: p.name, selected: p.name === state.profile }, p.name + (p.tenant ? ' — ' + p.tenant : ''))));
+    sel.hidden = s.profiles.length < 2 || !state.profile;
+    $('connectBtn').textContent = s.configured ? 'Add tenant' : 'Connect tenant';
+  }
+
+  // ---------- agent list ----------
+  async function loadAgents() {
+    $('listState').hidden = false;
+    $('listState').textContent = 'Loading agents…';
+    $('agentList').replaceChildren();
+    if (!state.status.configured) {
+      state.agents = [];
+      $('listState').textContent = 'Connect a tenant to see its agents.';
+      $('agentCount').textContent = '0';
+      return;
+    }
+    try {
+      state.agents = await api('GET', withProfile('/api/agents'));
+      renderList();
+    } catch (err) {
+      $('listState').replaceChildren(errorNotice(err));
+    }
+  }
+
+  function matches(a, q) {
+    if (!q) return true;
+    return [a.name, a.provider, a.platform, a.description, a.id].concat(a.skills).some((v) => v && String(v).toLowerCase().includes(q));
+  }
+
+  function renderList() {
+    const q = $('search').value.trim().toLowerCase();
+    const only = $('onlyInvocable').checked;
+    const list = state.agents.filter((a) => matches(a, q) && (!only || a.invocable));
+    $('agentCount').textContent = String(state.agents.length);
+    $('listState').hidden = list.length > 0;
+    if (!list.length) $('listState').textContent = state.agents.length ? 'No agents match that filter.' : 'No agents are registered in this tenant (or this user cannot see any).';
+    $('agentList').replaceChildren(...list.map((a) => {
+      const key = a.id || a.name;
+      const box = h('input', { type: 'checkbox', 'aria-label': 'Select ' + a.name, checked: state.checked.has(key), onclick: (e) => e.stopPropagation(), onchange: (e) => { e.target.checked ? state.checked.add(key) : state.checked.delete(key); renderBatch(); } });
+      return h('li', { class: 'agent' + (state.selected === key ? ' active' : ''), tabindex: '0', role: 'button', onclick: () => select(key), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(key); } } },
+        box,
+        h('div', { style: 'min-width:0' },
+          h('div', { class: 'agent-name' }, h('span', null, a.name), a.invocable ? h('span', { class: 'tag ok' }, 'callable') : h('span', { class: 'tag no', title: 'No A2A endpoint in its ASOR definition' }, 'no endpoint')),
+          h('div', { class: 'agent-meta' }, [a.provider, a.skills.length ? a.skills.length + ' skill' + (a.skills.length === 1 ? '' : 's') : null, a.version ? 'v' + a.version : null].filter(Boolean).join(' · ') || '—')));
+    }));
+    renderBatch();
+  }
+
+  function renderBatch() {
+    const n = state.checked.size;
+    $('batchBar').hidden = n === 0;
+    $('batchText').textContent = n + ' selected';
+    $('batchBtn').textContent = 'Generate ' + n + ' CLI' + (n === 1 ? '' : 's');
+  }
+
+  // ---------- detail ----------
+  async function select(key) {
+    state.selected = key;
+    state.chat = { contextId: null, taskId: null, log: [] };
+    renderList();
+    const pane = $('detailPane');
+    pane.replaceChildren(h('div', { class: 'detail' }, h('div', { class: 'list-state' }, 'Loading agent…')));
+    try {
+      state.detail = await api('GET', withProfile('/api/agent?ref=' + encodeURIComponent(key)));
+      renderDetail();
+    } catch (err) {
+      pane.replaceChildren(h('div', { class: 'detail' }, errorNotice(err)));
+    }
+  }
+
+  function renderDetail() {
+    const d = state.detail;
+    const c = d.card;
+    const key = c.id || c.name;
+    const provider = typeof c.provider === 'string' ? c.provider : c.provider && (c.provider.descriptor || c.provider.organization || c.provider.id);
+    const platform = typeof c.platform === 'string' ? c.platform : c.platform && (c.platform.descriptor || c.platform.id);
+
+    const title = h('div', { class: 'agent-title' },
+      h('h1', null, c.name, d.invocable ? h('span', { class: 'tag ok' }, 'callable') : h('span', { class: 'tag no' }, 'no endpoint')),
+      c.description ? h('p', { class: 'desc' }, c.description) : null,
+      h('div', { class: 'facts' },
+        c.version ? h('span', null, 'Version ', h('b', null, c.version)) : null,
+        provider ? h('span', null, 'Provider ', h('b', null, provider)) : null,
+        platform ? h('span', null, 'Platform ', h('b', null, platform)) : null,
+        c.id ? h('span', null, 'ASOR id ', h('b', { class: 'mono' }, c.id)) : null),
+      !d.invocable ? h('div', { class: 'notice warn' }, 'This agent cannot be called from a CLI yet: ' + d.reason + '.', h('small', null, 'You can still generate the CLI; it will work once the agent\'s ASOR definition exposes an A2A endpoint.')) : null);
+
+    const skills = (c.skills || []).length ? h('div', { class: 'skills' }, c.skills.map((s) => h('div', { class: 'skill' }, h('b', null, s.name || s.id), s.id ? h('code', null, s.id) : null, s.description ? h('p', null, s.description) : null))) : null;
+
+    // generate form
+    const cmdInput = h('input', { type: 'text', class: 'mono', value: d.command, spellcheck: false, 'aria-label': 'Command name', oninput: () => { outInput.value = joinPath(state.status.outRoot, slug(cmdInput.value) || d.command); updatePreview(); } });
+    const outInput = h('input', { type: 'text', class: 'mono', value: d.outDir, spellcheck: false, 'aria-label': 'Output folder' });
+    const pin = h('input', { type: 'checkbox', checked: Boolean(state.status.profileSaved) });
+    const force = h('input', { type: 'checkbox' });
+    const preview = h('div', { class: 'preview' });
+    function updatePreview() {
+      const cmd = slug(cmdInput.value) || d.command;
+      preview.replaceChildren(h('span', { class: 'p' }, '$ '), cmd + ' ask "What can you help me with?"\n', h('span', { class: 'p' }, '$ '), 'echo "…" | ' + cmd + ' ask --json');
+    }
+    updatePreview();
+    const resultSlot = h('div', { style: 'display:grid;gap:16px' });
+    const genBtn = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
+      resultSlot.replaceChildren();
+      busy(genBtn, true, 'Generating…');
+      try {
+        const r = await api('POST', '/api/generate', { ref: key, command: slug(cmdInput.value), outDir: outInput.value, pinProfile: pin.checked, force: force.checked, profile: state.profile });
+        state.results[key] = r;
+        resultSlot.replaceChildren(renderResult(r));
+      } catch (err) {
+        resultSlot.replaceChildren(errorNotice(err));
+      } finally { busy(genBtn, false, 'Generate CLI'); }
+    } }, 'Generate CLI');
+
+    const generateCard = h('div', { class: 'card' },
+      h('div', { class: 'card-head' }, h('div', null, h('h3', null, 'Generate a CLI for this agent'), h('p', null, 'A standalone command pinned to ' + c.name + '. No dependencies, only Node 22+.'))),
+      h('div', { class: 'card-body' },
+        h('div', { class: 'grid2' },
+          h('label', { class: 'field' }, 'Command name', h('span', { class: 'hint' }, 'Lowercase letters, digits, dashes'), cmdInput),
+          h('label', { class: 'field' }, 'Output folder', h('span', { class: 'hint' }, 'Created if missing'), outInput)),
+        h('div', { class: 'row' },
+          state.status.profileSaved ? h('label', { class: 'check' }, pin, 'Default to profile "' + state.status.profile + '"') : null,
+          h('label', { class: 'check' }, force, 'Overwrite if the folder exists')),
+        preview,
+        h('div', { class: 'row' }, genBtn),
+        resultSlot));
+    if (state.results[key]) resultSlot.replaceChildren(renderResult(state.results[key]));
+
+    $('detailPane').replaceChildren(h('div', { class: 'detail' }, title, skills, generateCard, renderTry(key, d.invocable, c)));
+  }
+
+  function renderResult(r) {
+    const tabs = h('div', { class: 'tabs', role: 'tablist' });
+    const panel = h('div', { class: 'snippet', role: 'tabpanel' });
+    function show(i) {
+      [...tabs.children].forEach((t, j) => t.setAttribute('aria-selected', String(i === j)));
+      const s = r.snippets[i];
+      panel.replaceChildren(h('p', null, s.description), codeBlock(s.code));
+    }
+    r.snippets.forEach((s, i) => tabs.append(h('button', { class: 'tab', role: 'tab', type: 'button', onclick: () => show(i) }, s.surface)));
+    show(0);
+    const bin = r.files.filter((f) => !f.startsWith('lib/'));
+    return h('div', { class: 'card', style: 'box-shadow:none' },
+      h('div', { class: 'card-body' },
+        h('div', { class: 'result-head' },
+          h('div', null,
+            h('div', { class: 'notice good', style: 'display:inline-block;margin-bottom:8px' }, '✓ Generated ', h('code', null, r.command)),
+            h('div', { class: 'path' }, r.outDir)),
+          h('div', { class: 'row' },
+            h('button', { class: 'btn sm', type: 'button', onclick: () => copy(r.outDir) }, 'Copy path'),
+            h('a', { class: 'btn sm primary', href: '/download?id=' + encodeURIComponent(r.downloadId) + '&t=' + encodeURIComponent(TOKEN), download: r.command + '.zip', style: 'text-decoration:none' }, 'Download .zip'))),
+        h('div', { class: 'files' }, bin.map((f) => h('code', null, f)), h('code', null, 'lib/ (' + (r.files.length - bin.length) + ' files)')),
+        !r.invocable ? h('div', { class: 'notice warn' }, 'Heads up: the agent has no callable endpoint yet, so `ask` will exit with code 4 until it does.') : null,
+        h('h3', { style: 'font-size:14px;margin-top:4px' }, 'Use it on any surface'),
+        tabs, panel));
+  }
+
+  function codeBlock(text) {
+    return h('div', { class: 'code' }, h('pre', null, h('code', null, text)), h('button', { class: 'btn sm copy', type: 'button', onclick: () => copy(text) }, 'Copy'));
+  }
+
+  function renderTry(key, invocable, card) {
+    const log = h('div', { class: 'chat', 'aria-live': 'polite' });
+    const input = h('textarea', { placeholder: invocable ? 'Ask ' + card.name + ' something…' : 'This agent has no callable endpoint.', disabled: !invocable, onkeydown: (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) send(); } });
+    const skillSel = (card.skills || []).some((s) => s.id) ? h('select', { style: 'width:auto', 'aria-label': 'Skill' }, h('option', { value: '' }, 'Any skill'), card.skills.filter((s) => s.id).map((s) => h('option', { value: s.id }, s.name || s.id))) : null;
+    const sendBtn = h('button', { class: 'btn primary', type: 'button', disabled: !invocable, onclick: () => send() }, 'Send');
+    const resetBtn = h('button', { class: 'btn ghost', type: 'button', onclick: () => { state.chat = { contextId: null, taskId: null, log: [] }; draw(); } }, 'New conversation');
+    function draw() {
+      log.replaceChildren(...state.chat.log.map((m) => h('div', { class: 'msg from-' + m.role }, m.text, m.meta ? h('span', { class: 'meta' }, m.meta) : null)));
+      log.hidden = state.chat.log.length === 0;
+      log.scrollTop = log.scrollHeight;
+    }
+    async function send() {
+      const text = input.value.trim();
+      if (!text) return;
+      state.chat.log.push({ role: 'user', text });
+      input.value = '';
+      draw();
+      busy(sendBtn, true, 'Waiting…');
+      try {
+        const r = await api('POST', '/api/invoke', { ref: key, message: text, contextId: state.chat.contextId, taskId: state.chat.taskId, skill: skillSel && skillSel.value, profile: state.profile });
+        state.chat.contextId = r.contextId || state.chat.contextId;
+        state.chat.taskId = r.state === 'input-required' ? r.taskId : null;
+        state.chat.log.push(r.ok ? { role: 'agent', text: r.text || '(no text)', meta: r.state === 'completed' ? null : 'state: ' + r.state + (r.state === 'input-required' ? ' — reply to continue' : '') } : { role: 'err', text: (r.error && r.error.message) || 'Agent task ended in state ' + r.state });
+      } catch (err) {
+        state.chat.log.push({ role: 'err', text: err.message + (err.hint ? '\n' + err.hint : '') });
+      } finally { busy(sendBtn, false, 'Send'); draw(); input.focus(); }
+    }
+    draw();
+    return h('div', { class: 'card' },
+      h('div', { class: 'card-head' }, h('div', null, h('h3', null, 'Try it'), h('p', null, 'Talk to the agent before you ship a CLI for it. Uses the same A2A call the CLI makes.'))),
+      h('div', { class: 'card-body' }, log, input, h('div', { class: 'row' }, sendBtn, skillSel, h('span', { class: 'spacer' }), resetBtn, h('span', { style: 'color:var(--faint);font-size:12px' }, 'Ctrl+Enter to send'))));
+  }
+
+  function renderEmpty() {
+    const s = state.status;
+    const pane = $('detailPane');
+    if (!s.configured) {
+      pane.replaceChildren(h('div', { class: 'empty' },
+        h('h1', null, 'Turn Workday agents into CLIs'),
+        h('p', null, 'Pick agents registered in your tenant\'s Agent System of Record and generate a dedicated command-line tool for each one. Hand those to Slack, Teams, Claude Code, or anything that can run a command.'),
+        // With no saved profiles, "not configured" is expected; only surface real errors (e.g. a broken profile).
+        s.error && s.profiles.length ? h('div', { class: 'notice warn' }, s.error.message, s.error.hint ? h('small', null, s.error.hint) : null) : null,
+        h('div', { class: 'row' }, h('button', { class: 'btn primary', type: 'button', onclick: openLogin }, 'Connect a tenant'))));
+      return;
+    }
+    pane.replaceChildren(h('div', { class: 'empty' },
+      h('h1', null, 'Pick an agent to build its CLI'),
+      h('ol', { class: 'steps' },
+        h('li', null, h('div', null, h('b', null, 'Select an agent on the left'), h('span', null, 'Agents marked callable expose an A2A endpoint the CLI can talk to.'))),
+        h('li', null, h('div', null, h('b', null, 'Try it, then generate'), h('span', null, 'Name the command and choose a folder. Tick several agents to generate them all at once.'))),
+        h('li', null, h('div', null, h('b', null, 'Use it anywhere'), h('span', null, 'Each CLI ships with a Claude skill, an LLM tool definition, and recipes for Slack and Teams.')))),
+      h('p', { class: 'path' }, 'CLIs are written under ' + s.outRoot)));
+  }
+
+  // ---------- batch ----------
+  async function batchGenerate() {
+    const keys = [...state.checked];
+    const btn = $('batchBtn');
+    busy(btn, true, 'Generating…');
+    const rows = [];
+    for (const key of keys) {
+      const a = state.agents.find((x) => (x.id || x.name) === key);
+      try {
+        const r = await api('POST', '/api/generate', { ref: key, pinProfile: Boolean(state.status.profileSaved), profile: state.profile });
+        state.results[key] = r;
+        state.checked.delete(key);
+        rows.push({ name: a ? a.name : key, r });
+      } catch (err) { rows.push({ name: a ? a.name : key, err }); }
+    }
+    busy(btn, false);
+    renderBatch();
+    state.selected = null;
+    renderList();
+    $('detailPane').replaceChildren(h('div', { class: 'detail' },
+      h('div', { class: 'agent-title' }, h('h1', null, 'Generated ' + rows.filter((x) => x.r).length + ' of ' + rows.length + ' CLIs'), h('p', { class: 'desc' }, 'Select any agent on the left for its surface recipes.')),
+      h('div', { class: 'card' }, h('div', { class: 'card-body' }, rows.map((x) => x.r
+        ? h('div', { class: 'result-head' }, h('div', null, h('b', null, x.name), ' → ', h('code', null, x.r.command), h('div', { class: 'path' }, x.r.outDir)), h('a', { class: 'btn sm', href: '/download?id=' + encodeURIComponent(x.r.downloadId) + '&t=' + encodeURIComponent(TOKEN), download: x.r.command + '.zip', style: 'text-decoration:none' }, 'Download .zip'))
+        : h('div', null, h('b', null, x.name), errorNotice(x.err)))))));
+  }
+
+  // ---------- login ----------
+  function openLogin() {
+    $('loginError').replaceChildren();
+    $('loginDialog').showModal();
+  }
+  async function submitLogin() {
+    const form = $('loginForm');
+    if (!form.reportValidity()) return;
+    const f = new FormData(form);
+    const body = Object.fromEntries([...f.entries()].filter(([k]) => k !== 'makeDefault'));
+    body.makeDefault = f.has('makeDefault');
+    const btn = $('loginSubmit');
+    busy(btn, true, 'Verifying…');
+    try {
+      const r = await api('POST', '/api/login', body);
+      $('loginDialog').close();
+      form.reset();
+      state.profile = r.profile;
+      toast('Connected — ' + r.agents + ' agent' + (r.agents === 1 ? '' : 's') + ' visible');
+      await boot();
+    } catch (err) {
+      $('loginError').replaceChildren(errorNotice(err));
+    } finally { busy(btn, false, 'Save & verify'); }
+  }
+
+  // ---------- utils ----------
+  function slug(v) { return String(v || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, ''); }
+  function joinPath(root, name) { const sep = root.includes('\\') ? '\\' : '/'; return root.replace(/[\\/]+$/, '') + sep + name; }
+
+  async function boot() {
+    try { await loadStatus(); } catch (err) { $('detailPane').replaceChildren(h('div', { class: 'detail' }, errorNotice(err))); return; }
+    state.selected = null;
+    state.checked.clear();
+    renderEmpty();
+    await loadAgents();
+  }
+
+  $('search').addEventListener('input', renderList);
+  $('onlyInvocable').addEventListener('change', renderList);
+  $('refreshBtn').addEventListener('click', loadAgents);
+  $('connectBtn').addEventListener('click', openLogin);
+  $('loginSubmit').addEventListener('click', submitLogin);
+  $('clearSel').addEventListener('click', () => { state.checked.clear(); renderList(); });
+  $('batchBtn').addEventListener('click', batchGenerate);
+  $('profileSelect').addEventListener('change', (e) => { state.profile = e.target.value; boot(); });
+  boot();
+})();
+</script>
+</body>
+</html>

@@ -16,4 +16,6 @@ The security of Workday itself, of individual agents, and of Slack or Teams is o
 
 - Profiles and the token cache are written with mode `0600`, and the directory with `0700`. On Windows they live under the user's `%APPDATA%`.
 - The Workday access token is sent to an agent endpoint only when `--agent-auth workday` (or `ASOR_AGENT_AUTH=workday`) is set explicitly.
+- `asor ui` binds to 127.0.0.1 only. Every request needs the random per-run session token and a loopback `Host` header, and the page is served with a nonce CSP. Downloads are limited to packages generated in the same session.
+- Generated CLIs contain no credentials.
 - The example bots enforce allow-lists, spawn without a shell, pass user text on stdin, and strip their own secrets from the child environment.

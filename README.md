@@ -1,21 +1,26 @@
 # asor-cli
 
-**Use Workday ASOR agents from anything that can run a command.**
+**Turn each Workday ASOR agent into its own command-line tool.**
 
-`asor` logs into a Workday tenant, lists the agents registered in the **Agent System of Record (ASOR)**, and calls them over the [A2A protocol](https://a2a-protocol.org). It can also **wrap a single agent as its own CLI**: a small package with a tool definition and a `SKILL.md`. You can hand that package to a Slack bot, a Teams bot, Claude Code, a cron job, or a CI pipeline, and it can use the agent without knowing anything about Workday.
+`asor` connects to a Workday tenant and lists the agents registered in its **Agent System of Record (ASOR)**. You pick the ones you want, and it **generates a dedicated CLI for each agent**:
+
+- `benefits-helper ask "…"`
+- `payroll-agent ask "…"`
+
+Each CLI is pinned to one agent, has no dependencies, and ships with a Claude `SKILL.md` and an LLM `tool.json`. Hand it to a Slack bot, a Teams bot, Claude Code, a cron job, or anything else that can run a command. That surface never has to know about Workday, ASOR, or A2A.
 
 ```text
-                ┌──────────── Workday tenant ────────────┐
- asor login ──▶ │ OAuth token  ──▶  ASOR /agentDefinition │
-                └───────────────────────┬────────────────┘
-                                        │ agent card: name, skills, url
- asor invoke ─────────── A2A JSON-RPC ──▼──▶  the agent's endpoint
- asor wrap   ──▶ benefits-helper  (bin + tool.json + SKILL.md)
-                        ▲
-      Slack · Teams · Claude Code · cron · CI · anything with a shell
+  asor ui  (or asor wrap)                          your surfaces
+ ┌───────────────────────────┐   generates   ┌──────────────────────────────┐
+ │ Workday tenant · ASOR     │ ────────────▶ │ benefits-helper   (its own   │──▶ Slack bot
+ │  ☑ Benefits Helper        │               │ payroll-agent      CLI, skill│──▶ Teams bot
+ │  ☑ Payroll Agent          │               │ …                  & tool)   │──▶ Claude Code
+ │  ☐ Expenses Agent         │               └──────────────────────────────┘──▶ cron / CI / …
+ └───────────────────────────┘
+        each generated CLI talks to its one agent over A2A at runtime
 ```
 
-> **Status: early (0.1).** The full test suite runs against the bundled mock tenant. The ASOR endpoints and headers come from Workday's published [ASOR API spec (v1.2)](https://github.com/Workday/asor) and from working registration code. Please [open an issue](https://github.com/gilfila/asor-cli/issues) with what you see on a real tenant.
+> **Status: early (0.2).** The full test suite runs against the bundled mock tenant. The ASOR endpoints and headers come from Workday's published [ASOR API spec (v1.2)](https://github.com/Workday/asor) and from working registration code. Please [open an issue](https://github.com/gilfila/asor-cli/issues) with what you see on a real tenant.
 >
 > This is an independent open-source project. It is **not affiliated with or endorsed by Workday**.
 
@@ -23,106 +28,110 @@
 
 ```bash
 npm install -g github:gilfila/asor-cli    # needs Node.js 22+
-asor --help
 ```
 
 To install from a clone instead, run `npm install && npm run build && npm link`.
 
-## Quickstart
+## Quickstart: pick agents, get CLIs
 
 ```bash
-asor login                      # host, tenant alias, API client id/secret, refresh token
-asor whoami                     # checks the token exchange and the ASOR call
-asor agents list
-asor agents get benefits-helper
-asor invoke benefits-helper "When does open enrollment start?"
+asor ui
 ```
 
-You can try it without a tenant using the bundled mock tenant:
+![asor ui: pick agents from ASOR, try them, and generate a CLI for each](docs/asor-ui.png)
+
+This opens a local page in your browser, where you:
+
+1. **Connect your tenant.** Enter the host, tenant alias, API client id and secret, and a refresh token. They are saved to a local profile that only you can read, and verified against Workday.
+2. **Browse the agents registered in ASOR.** Filter by name, provider, or skill. Agents marked *callable* expose an A2A endpoint.
+3. **Try an agent** in the built-in chat before committing to it.
+4. **Generate its CLI.** Choose the command name and the folder, or tick several agents and generate them all at once.
+5. **Copy the recipe for your surface.** The recipes cover install, scripts, credentials, Slack, Teams, Claude Code, and LLM tools. You can also download the CLI as a `.zip` to move it to another machine.
+
+Prefer the terminal? You get the same result without a browser:
 
 ```bash
-npm run mock        # prints the ASOR_* variables to export, then leave it running
-asor agents list
-asor invoke echo "hello"
-asor invoke echo --stream "hello"
+asor login                          # save tenant credentials
+asor wrap                           # lists the agents; pick e.g. "1,3" or "all"
+asor wrap benefits-helper           # or name one directly → ./asor-agents/benefits-helper
 ```
 
-## Commands
+You can try all of this without a tenant using the bundled mock tenant: run `npm run mock` in a clone, export the variables it prints, then run `asor ui`.
 
-| Command | What it does |
-|---|---|
-| `asor login [--profile p]` | Saves credentials to a profile that only you can read. It prompts for anything missing, and `--from-env` imports the `ASOR_*` variables. |
-| `asor whoami` | Shows the resolved config with secrets masked, then tests the token exchange and an ASOR call. The errors include fix-it hints. |
-| `asor profiles` / `asor logout` | Lists or deletes saved profiles. |
-| `asor agents list` | Lists agents with provider, skills, and whether each is **invocable** (has an A2A endpoint). |
-| `asor agents get <agent>` | Shows the full definition and skills. |
-| `asor agents register --file card.json` | Registers or updates an agent. ASOR upserts when name, provider, and version match. |
-| `asor invoke <agent> [message]` | Asks the agent. The prompt comes from the argument, or from **stdin**. |
-| `asor wrap <agent> --out dir` | Generates a standalone CLI for one agent. |
+## What a generated CLI looks like
 
-`<agent>` can be an id, the exact name, a slug (`benefits-helper`), or any unique part of the name.
+```text
+asor-agents/benefits-helper/
+  bin/benefits-helper.js   the CLI, pinned to this one agent (no dependencies; Node 22+)
+  lib/                     the runtime it needs, vendored
+  SKILL.md                 drop-in skill for Claude Code and other agents
+  tool.json                function-calling tool definition (JSON Schema input + how to invoke)
+  README.md                install + usage for whoever you hand it to
+  agent-card.json          the ASOR definition it was generated from
+```
 
-### `invoke` options
+```bash
+npm install -g ./asor-agents/benefits-helper
+benefits-helper ask "When does open enrollment start?"
+echo "When does open enrollment start?" | benefits-helper ask --json     # for bots
+benefits-helper ask --context-id <id> "and for dependents?"             # follow-up
+benefits-helper info       # the agent's live ASOR definition
+benefits-helper skills     # works offline
+```
 
-| Option | |
-|---|---|
-| `--json` | Prints one JSON envelope: `{ok, agent, contextId, taskId, state, text, artifacts, error}`. |
-| `--stream` | Uses `message/stream` (SSE). With `--json` the output is JSON Lines, and the last line is the envelope, tagged `"type":"result"`. |
-| `--context-id <id>` | Continues a conversation. |
-| `--task-id <id>` | Answers a task that is in `input-required`. |
-| `--skill <id>` | Targets a skill. It is sent as message metadata `skillId`. |
-| `--timeout <s>` | Sets the timeout. The default is 120. Long-running tasks are polled with `tasks/get`. |
-| `--agent-auth none\|workday\|bearer` | Sets the credential sent to the **agent's** endpoint (see Security). |
+At runtime, the CLI looks up its agent in ASOR by id (falling back to its name if the agent was re-registered) and calls it over A2A. It reads the same credentials as `asor`: either a saved profile, or `ASOR_TENANT`, `ASOR_CLIENT_ID`, `ASOR_CLIENT_SECRET`, and `ASOR_REFRESH_TOKEN` on a bot host. **No credentials are ever written into the generated package.**
 
-### Exit codes
+### The bot contract
+
+Every generated CLI and `asor invoke` follow the same contract.
+
+`--json` prints one envelope, `{ok, agent, contextId, taskId, state, text, artifacts, error}`, and the exit code tells a bot what happened:
 
 | Code | Meaning |
 |---|---|
-| 0 | OK. This includes `input-required`: check `state`. |
+| 0 | OK. This includes `input-required`: check `state` and reply with `--context-id` and `--task-id`. |
 | 1 | Unexpected error |
 | 2 | Usage error or ambiguous agent name |
 | 3 | Auth or config problem. Don't retry. |
 | 4 | Agent not found, or not invocable |
 | 5 | The agent's task failed, was rejected, or timed out |
 
-## Wrap an agent for any surface
+`ask` options:
 
-```bash
-asor wrap benefits-helper --out ./benefits-helper
-```
+| Option | What it does |
+|---|---|
+| `--stream` | Streams the answer. With `--json` the output is JSON Lines, and the last line is the envelope. |
+| `--skill <id>` | Targets one skill. |
+| `--timeout <s>` | Sets the timeout. The default is 120 seconds. |
+| `--agent-auth none\|workday\|bearer` | Chooses the credential sent to the agent's own endpoint (see Security). |
 
-The command generates this package:
-
-```text
-benefits-helper/
-  bin/benefits-helper.js   CLI pinned to the agent (no dependencies; Node 22+)
-  lib/                     the asor runtime, vendored
-  tool.json                function-calling tool definition (JSON Schema input + how to invoke)
-  SKILL.md                 drop-in skill for Claude Code and other agents
-  README.md
-  agent-card.json          the definition it was generated from
-```
-
-```bash
-npm install -g ./benefits-helper
-benefits-helper ask "When does open enrollment start?"
-echo "When does open enrollment start?" | benefits-helper ask --json
-benefits-helper info
-benefits-helper skills
-```
-
-### Surface recipes
+## Use a generated CLI on any surface
 
 | Surface | How |
 |---|---|
-| **Slack** | [`examples/slack-bolt`](examples/slack-bolt): Bolt in Socket Mode, with `/asor list`, `/asor <agent> <msg>`, and threaded conversations. |
-| **Microsoft Teams** | [`examples/teams`](examples/teams): a Bot Framework bot. One Teams conversation maps to one A2A context. |
+| **Slack** | [`examples/slack-bolt`](examples/slack-bolt): Bolt in Socket Mode. Set `ASOR_WRAPPED_BIN` to a generated CLI and the bot answers @mentions with that agent, in threads. |
+| **Microsoft Teams** | [`examples/teams`](examples/teams): a Bot Framework bot. Set `ASOR_WRAPPED_BIN`. One Teams conversation maps to one A2A context. |
 | **Claude Code / agents** | [`examples/claude-skill`](examples/claude-skill): copy the wrapped `SKILL.md` into `.claude/skills/`. |
 | **Any LLM tool-calling bot** | Register `tool.json`, run `invocation.command` with the message on stdin, and return `text`. |
-| **Scripts / cron / CI** | `echo "..." \| asor invoke <agent> --json \| jq -r .text`. Use the exit code to decide what happens next. |
+| **Scripts / cron / CI** | `echo "..." \| benefits-helper ask --json \| jq -r .text`. Use the exit code to decide what happens next. |
 | **Node code** | `import { createContext, resolveAgent, a2aInvoker } from 'asor-cli'`. This skips the subprocess entirely. |
 
 The bot examples share [`examples/shared/asor-runner.mjs`](examples/shared/asor-runner.mjs), a small, safe way to call the CLI from a bot. Run `node examples/shared/demo.mjs` to exercise it against the mock tenant.
+
+## All commands
+
+| Command | What it does |
+|---|---|
+| `asor ui [--out dir] [--port n]` | Opens the local agent picker. It listens on 127.0.0.1 only and needs the session token in the printed URL. |
+| `asor wrap [<agent>] [--out dir] [--name cmd]` | Generates a CLI for one agent. With no `<agent>`, you pick from a list. The alias is `asor generate`. |
+| `asor login [--profile p]` | Saves credentials to a profile that only you can read, then verifies it. `--from-env` imports the `ASOR_*` variables. |
+| `asor whoami` | Shows the resolved config with secrets masked, then tests the token exchange and an ASOR call. The errors include fix-it hints. |
+| `asor profiles` / `asor logout` | Lists or deletes saved profiles. |
+| `asor agents list` / `get <agent>` | Lists the registered agents, or shows one definition with its skills. |
+| `asor agents register --file card.json` | Registers or updates an agent. ASOR upserts when name, provider, and version match. |
+| `asor invoke <agent> [message]` | Asks any agent directly. This is handy for exploring. Generated CLIs are the thing to ship. |
+
+`<agent>` can be an id, the exact name, a slug (`benefits-helper`), or any unique part of the name.
 
 ## Tenant setup
 
@@ -176,6 +185,8 @@ Agents with no callable endpoint are still listed, with `invocable: no`. This ty
 - **Secrets stay on disk with owner-only permissions.** They live in a mode-0600 profile and a separate token cache. Neither is printed; `whoami` masks them.
 - **Prompts can stay off the command line.** They can come from stdin, which keeps them out of process listings and shell history. The bot runner always does this, spawns without a shell, and puts `--` before the agent name.
 - **Your Workday token isn't forwarded by default.** An agent's `url` may point at a third party, so `--agent-auth` defaults to `none`. Choose `workday` only for endpoints you trust with that token, or use `bearer` with `ASOR_AGENT_TOKEN`.
+- **Generated CLIs carry no secrets.** They contain the agent's id, name, and skills only, so you can share them or commit them to a repo.
+- **`asor ui` is loopback-only.** It binds to `127.0.0.1` and requires a random session token on every request. It also rejects foreign `Host` headers (DNS rebinding) and serves a nonce-based CSP. The token is removed from the address bar once the page loads.
 - **Workday access is shared.** A bot gives everyone who can talk to it the integration user's Workday access. Scope that user narrowly, and use the allow-lists in the examples.
 
 See [SECURITY.md](SECURITY.md) to report a vulnerability.
@@ -186,6 +197,7 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 npm install
 npm test          # builds, then runs node:test against the mock tenant
 npm run mock      # mock tenant on :4010 (set PORT to change)
+npm run build && node dist/src/cli.js ui   # the picker, against whatever ASOR_* points at
 ```
 
 The runtime has no dependencies: it uses native `fetch`, `node:util` `parseArgs`, and `node:test`. See [CONTRIBUTING.md](CONTRIBUTING.md).

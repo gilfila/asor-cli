@@ -7,6 +7,7 @@ Thanks for helping. Issues and PRs are welcome, especially reports from real Wor
 - **No runtime dependencies.** `asor wrap` copies the compiled runtime into every generated CLI, so it has to stay dependency-free. Use Node built-ins such as `fetch`, `node:util` `parseArgs`, and `node:test`.
 - **The bot contract is an API.** Treat these as breaking changes that need a major version: the `--json` envelope fields, the exit codes, and the `tool.json` shape.
 - **Every behavior gets a test against the mock tenant** (`mock/server.ts`). If a real tenant behaves differently from the mock, change the mock first so it reproduces that behavior.
+- **Generated CLIs vendor `dist/src` minus `ui/`, `cli.js`, `wrap.js`, and `index.js`** (see `NOT_VENDORED` in `src/wrap.ts`). Keep `wrapped.ts`'s import graph free of those.
 - **Never log secrets.** Mask anything credential-like with `mask()` from `src/config.ts`.
 
 ## Workflow
@@ -28,6 +29,7 @@ node examples/shared/demo.mjs
 | `src/a2a.ts`, `src/invoke.ts` | A2A JSON-RPC client (send, stream/SSE, tasks/get) and the invoker interface |
 | `src/resolve.ts` | Resolves an agent reference (id, name, slug, or substring) to a card |
 | `src/run-invoke.ts` | Shared invoke-and-print logic, including the JSON envelope |
-| `src/wrap.ts`, `src/wrapped.ts` | The `asor wrap` generator and the runtime of the generated CLIs |
+| `src/wrap.ts`, `src/wrapped.ts` | The `asor wrap` generator (plus surface recipes) and the runtime of the generated CLIs |
+| `src/ui/` | `asor ui`: a zero-dependency HTTP server (`server.ts`), a single page (`page.html`, copied into `dist` by `scripts/copy-assets.mjs`), and a small ZIP writer |
 | `mock/server.ts` | Fake tenant: token endpoint, ASOR API, A2A agents |
 | `examples/` | Slack, Teams, and Claude Code integrations |

@@ -39,6 +39,23 @@ export function createContext(flags: GlobalFlags, opts: { fetch?: FetchLike } = 
   return { cfg, tokens, client, flags, debug, fetch: fetchImpl };
 }
 
+/**
+ * Tests a saved profile exactly as stored, ignoring ASOR_* credential overrides, so `login` verifies what the user
+ * just typed rather than whatever the environment happens to hold. Returns the number of visible agents.
+ */
+export async function verifySavedProfile(profile: string, opts: { fetch?: FetchLike } = {}): Promise<{ tenant: string; agents: number }> {
+  const locationOnly = Object.fromEntries(
+    ['ASOR_CONFIG_DIR', 'APPDATA', 'XDG_CONFIG_HOME', 'ASOR_NO_TOKEN_CACHE'].filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]),
+  );
+  const cfg = resolveConfig({ profile, env: locationOnly });
+  const fetchImpl = opts.fetch ?? fetch;
+  const tokens = new TokenProvider(cfg, { fetch: fetchImpl, env: locationOnly });
+  tokens.invalidate();
+  await tokens.getToken({ forceRefresh: true });
+  const agents = await new AsorClient(cfg, tokens, { fetch: fetchImpl }).listAgents();
+  return { tenant: cfg.tenant, agents: agents.length };
+}
+
 /** Prints an error (as a JSON envelope with --json, otherwise as text on stderr) and returns its exit code. */
 export function reportError(err: unknown, json: boolean, prefix = 'asor'): number {
   const e = toCliError(err);

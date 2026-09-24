@@ -97,14 +97,69 @@ process.exitCode = await runWrapped(process.argv.slice(2), AGENT);
   return { command, outDir, binPath: join(outDir, binRel), files };
 }
 
+/** Only the generator, the web UI, and the asor router stay out of generated CLIs; they need none of them. */
+const NOT_VENDORED = new Set(['ui', 'cli.js', 'wrap.js', 'index.js']);
+
 function runtimeFiles(dir: string, base = dir): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (dir === base && NOT_VENDORED.has(entry.name)) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) out.push(...runtimeFiles(full, base));
     else if (entry.name.endsWith('.js')) out.push(relative(base, full));
   }
   return out;
+}
+
+export interface Snippet {
+  surface: string;
+  description: string;
+  code: string;
+}
+
+/** Copy-paste recipes for using a generated CLI on each surface. Shown by `asor wrap` and the web UI. */
+export function surfaceSnippets(result: WrapResult, opts: { tenant?: string; profile?: string } = {}): Snippet[] {
+  const { command, outDir, binPath } = result;
+  const q = (p: string) => (/\s/.test(p) ? `"${p}"` : p);
+  return [
+    {
+      surface: 'Install',
+      description: 'Put the command on your PATH. Or skip this and run the bin with node.',
+      code: `npm install -g ${q(outDir)}\n# or, without installing:\nnode ${q(binPath)} --help`,
+    },
+    {
+      surface: 'Terminal / scripts',
+      description: 'Pipe the prompt in and get JSON out. The exit code tells you what happened.',
+      code: `${command} ask "What can you help me with?"\necho "What can you help me with?" | ${command} ask --json | jq -r .text`,
+    },
+    {
+      surface: 'Credentials',
+      description: opts.profile
+        ? `The CLI uses the saved asor profile "${opts.profile}" on this machine. Anywhere else, set these instead:`
+        : 'The CLI reads the saved asor profile on this machine. On a server or bot host, set these instead:',
+      code: `ASOR_TENANT=${opts.tenant ?? '<tenant alias>'}\nASOR_CLIENT_ID=<api client id>\nASOR_CLIENT_SECRET=<api client secret>\nASOR_REFRESH_TOKEN=<refresh token>\n# ASOR_HOST=us.agent.workday.com`,
+    },
+    {
+      surface: 'Slack',
+      description: 'The bundled Bolt example answers @mentions with this agent only.',
+      code: `# examples/slack-bolt/.env\nASOR_WRAPPED_BIN=${binPath}`,
+    },
+    {
+      surface: 'Microsoft Teams',
+      description: 'The bundled Bot Framework example sends every message to this agent.',
+      code: `# examples/teams/.env\nASOR_WRAPPED_BIN=${binPath}`,
+    },
+    {
+      surface: 'Claude Code',
+      description: 'Install the generated SKILL.md so Claude calls the agent when it is relevant.',
+      code: `mkdir -p .claude/skills/${command}\ncp ${q(join(outDir, 'SKILL.md'))} .claude/skills/${command}/SKILL.md`,
+    },
+    {
+      surface: 'Any LLM tool-calling bot',
+      description: 'Register tool.json as a tool. When the model calls it, run the command with the message on stdin.',
+      code: `${q(join(outDir, 'tool.json'))}\n# run: ${command} ask --json   (message on stdin)`,
+    },
+  ];
 }
 
 function packageJson(card: AgentCard, command: string, binRel: string) {

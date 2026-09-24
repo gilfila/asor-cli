@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 — 2026-09-24
+
+The project's focus is now **one CLI per agent**.
+
+- **`asor ui`:** a local agent picker (loopback-only, protected by a session token) where you:
+  - connect a tenant,
+  - browse ASOR agents,
+  - try them in a chat,
+  - generate a CLI for one or many,
+  - copy per-surface recipes, or download the CLI as a `.zip`.
+- **`asor wrap` improvements:**
+  - With no agent, it shows an interactive picker that accepts `1,3`, `1-3`, or `all`.
+  - `--out` is optional and defaults to `./asor-agents/<command>`.
+  - `asor generate` is a new alias.
+  - It prints install and usage recipes.
+- **Smaller generated CLIs:** they no longer vendor the generator, the UI, or the `asor` router.
+- **Fix:** `asor login` now verifies the profile exactly as entered. Before, `ASOR_*` environment variables could override it during verification, so bad credentials could pass.
+
 ## 0.1.0 — 2026-09-24
 
 The first release.

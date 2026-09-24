@@ -1,7 +1,7 @@
 {
   "name": "asor-cli",
-  "version": "0.1.0",
-  "description": "Log into a Workday tenant, discover agents in the Agent System of Record (ASOR), and drive any of them from a CLI — so Slack bots, Teams bots, Claude Code, or cron can use them.",
+  "version": "0.2.0",
+  "description": "Turn each Workday ASOR agent into its own CLI: pick agents from your tenant's Agent System of Record and generate a dedicated, dependency-free command for Slack, Teams, Claude Code, or anything with a shell.",
   "type": "module",
   "license": "MIT",
   "author": "Tony Gilfillan",
@@ -40,7 +40,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "test": "npm run clean && npm run build && node --test \"dist/test/**/*.test.js\"",
     "mock": "npm run build && node dist/mock/server.js",

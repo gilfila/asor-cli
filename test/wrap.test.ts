@@ -60,6 +60,18 @@ describe('asor wrap', () => {
     assert.match(help.stdout, /echo-agent ask \[message\]/);
   });
 
+  it('defaults the output folder to ./asor-agents/<command> and needs an agent without a TTY', async () => {
+    const cwd = tempDir();
+    const r = await runCli(['wrap', 'benefits'], { env, cwd });
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(existsSync(join(cwd, 'asor-agents', 'benefits-helper', 'bin', 'benefits-helper.js')));
+    assert.match(r.stdout, /npm install -g/);
+    const missing = await runCli(['wrap'], { env, cwd });
+    assert.equal(missing.code, 2);
+    assert.match(missing.stderr, /asor ui/);
+    assert.equal((await runCli(['generate', 'echo', '--out', join(cwd, 'g')], { env })).code, 0, 'generate is an alias of wrap');
+  });
+
   it('reports errors with its own command name and exit codes', async () => {
     const r = await run(bin, ['ask', 'hi'], { env: { ASOR_CONFIG_DIR: tempDir() } });
     assert.equal(r.code, 3);

@@ -9,3 +9,5 @@ dist/
 # output of `asor wrap` when run from the repo root
 wrapped/
 examples/**/node_modules/
+asor-agents/
+.playwright-mcp/
