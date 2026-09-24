@@ -1,0 +1,14 @@
+{
+  "name": "asor-slack-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env app.mjs"
+  },
+  "dependencies": {
+    "@slack/bolt": "^4.4.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

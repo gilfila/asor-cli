@@ -1,0 +1,34 @@
+---
+name: echo-agent
+description: "Ask the \"Echo Agent\" Workday agent: Repeats what you say. Useful for testing the CLI plumbing. Use it whenever the user needs what this agent covers."
+---
+
+# Echo Agent
+
+Repeats what you say. Useful for testing the CLI plumbing.
+
+This agent is registered in a Workday tenant's Agent System of Record (ASOR). Call it through the `echo-agent` CLI.
+
+## How to call it
+
+Pass the user's request on **stdin** (never paste it into the command line) and always use `--json`:
+
+```bash
+printf '%s' "<the user's request>" | echo-agent ask --json
+```
+
+The command prints one JSON object:
+
+```json
+{ "ok": true, "state": "completed", "text": "…answer…", "contextId": "…", "taskId": "…", "artifacts": [], "error": null }
+```
+
+- Show `text` to the user.
+- **Follow-ups:** add `--context-id <contextId>` from the previous answer.
+- **`state: "input-required"`:** the agent needs more from the user. Ask them, then send the answer with both `--context-id` and `--task-id`.
+- **`ok: false`:** read `error.message` and `error.hint`. Exit code 3 means credentials. Tell the user and do not retry. Exit code 5 means the agent failed or timed out, and one retry is reasonable.
+
+## Skills
+- **Echo** (`--skill echo`): Echo the message back. _(tags: test)_
+  - e.g. "hello there"
+- **Shout** (`--skill shout`): Echo the message back in capitals. _(tags: test)_

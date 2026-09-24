@@ -1,0 +1,11 @@
+# Changelog
+
+## 0.1.0 — 2026-09-24
+
+The first release.
+
+- **Login and profiles.** `asor login`, `whoami`, `profiles`, and `logout`. Login uses the refresh-token grant. Rotated refresh tokens are saved, and the access-token cache lives on disk.
+- **Agents.** `asor agents list|get|register` against the Workday ASOR API (`/asor/v1/agentDefinition`).
+- **Invoke.** `asor invoke` speaks A2A JSON-RPC (`message/send`, `message/stream`, and `tasks/get` polling). It supports stdin prompts, a `--json` envelope, and stable exit codes.
+- **Wrap.** `asor wrap` generates a standalone CLI for one agent, together with a `tool.json` and a `SKILL.md`.
+- **Mock tenant and examples.** A mock tenant for tests and demos, plus Slack (Bolt), Teams (Bot Framework), and Claude Code examples.

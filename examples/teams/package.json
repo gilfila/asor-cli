@@ -1,0 +1,15 @@
+{
+  "name": "asor-teams-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file=.env index.mjs"
+  },
+  "dependencies": {
+    "botbuilder": "^4.23.0",
+    "express": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tgz
+.env
+.env.*
+!.env.example
+# local asor-cli config if someone points ASOR_CONFIG_DIR inside the repo
+.asor/
+# output of `asor wrap` when run from the repo root
+wrapped/
+examples/**/node_modules/
