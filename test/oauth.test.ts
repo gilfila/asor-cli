@@ -125,7 +125,8 @@ describe('asor login --authorize', () => {
   it('signs in through a localhost callback, stores the refresh token, and verifies it', async () => {
     const port = await freePort();
     const redirectUri = `http://localhost:${port}/callback`;
-    await withMock({ redirectUri, refreshTokenExpiresIn: 30 * 86400 }, async (mock) => {
+    // clientAuth: 'post' mirrors Workday's agent host, which rejects a Basic-header-only token request.
+    await withMock({ redirectUri, refreshTokenExpiresIn: 30 * 86400, clientAuth: 'post' }, async (mock) => {
       const dir = tempDir();
       const cli = spawnCli(loginArgs(mock.url, redirectUri), { ASOR_CONFIG_DIR: dir });
       const [, url] = await cli.waitFor(AUTH_URL);
@@ -164,6 +165,32 @@ describe('asor login --authorize', () => {
       const result = await cli.done;
       assert.equal(result.code, 0, result.stderr);
       assert.equal(mock.state.authorizeRequests[0]!.code_challenge, undefined, '--no-pkce omits the challenge');
+    });
+  });
+
+  it('suggests --client-auth post when the token endpoint rejects a Basic header', async () => {
+    const redirectUri = 'https://localhost:8765/callback';
+    await withMock({ redirectUri, clientAuth: 'post' }, async (mock) => {
+      const cli = spawnCli(loginArgs(mock.url, redirectUri, ['--client-auth', 'basic']), { ASOR_CONFIG_DIR: tempDir() });
+      const [, url] = await cli.waitFor(AUTH_URL);
+      await cli.waitFor(/Paste the address you landed on/);
+      const landed = (await fetch(url!, { redirect: 'manual' })).headers.get('location')!;
+      cli.child.stdin.end(`${landed}
+`);
+      const result = await cli.done;
+      assert.equal(result.code, 3);
+      assert.match(result.stderr, /HTTP 400\): Invalid request/);
+      assert.match(result.stderr, /--client-auth post/);
+    });
+  });
+
+  it('keeps using body credentials for later refreshes', async () => {
+    await withMock({ clientAuth: 'post' }, async (mock) => {
+      const r = await runCli(['agents', 'list', '--json'], { env: { ...mock.env, ASOR_CONFIG_DIR: tempDir(), ASOR_NO_TOKEN_CACHE: '1' } });
+      assert.equal(r.code, 0, r.stderr);
+      const basic = await runCli(['agents', 'list'], { env: { ...mock.env, ASOR_CONFIG_DIR: tempDir(), ASOR_NO_TOKEN_CACHE: '1', ASOR_CLIENT_AUTH: 'basic' } });
+      assert.equal(basic.code, 3);
+      assert.match(basic.stderr, /--client-auth post/);
     });
   });
 

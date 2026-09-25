@@ -5,6 +5,40 @@ import { configDir, saveProfile, writePrivateFile, type ResolvedConfig } from '.
 import { CliError } from './errors.js';
 
 export type FetchLike = typeof fetch;
+
+/**
+ * How the client authenticates to the token endpoint.
+ * - `post` (default): client_id and client_secret in the form body (OAuth "client_secret_post"). Workday's agent host
+ *   (`{host}/auth/oauth2/{tenant}/token`) requires this: a Basic header alone gets `{"error": "Invalid request"}`.
+ * - `basic`: an HTTP Basic Authorization header ("client_secret_basic"), for token endpoints that only accept that.
+ */
+export type ClientAuthMethod = 'post' | 'basic';
+
+export function parseClientAuth(value: string): ClientAuthMethod {
+  if (value === 'post' || value === 'basic') return value;
+  throw new CliError('usage', `Unknown client auth method "${value}".`, { hint: 'Use post (credentials in the form body) or basic (HTTP Basic header).' });
+}
+
+/** Builds headers and form body for a token-endpoint POST using the chosen client authentication method. */
+export function tokenRequest(method: ClientAuthMethod, clientId: string, clientSecret: string, params: Record<string, string>): { headers: Record<string, string>; body: URLSearchParams } {
+  const body = new URLSearchParams(params);
+  const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' };
+  if (method === 'basic') {
+    headers.Authorization = `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`;
+  } else {
+    body.set('client_id', clientId);
+    body.set('client_secret', clientSecret);
+  }
+  return { headers, body };
+}
+
+/** A hint for token-endpoint 400s that are really a client-authentication mismatch. */
+export function clientAuthHint(method: ClientAuthMethod, errorText: string): string | undefined {
+  if (!/invalid[ _]request/i.test(errorText)) return undefined;
+  return method === 'basic'
+    ? 'This token endpoint may want the client credentials in the form body. Retry with `--client-auth post` (or ASOR_CLIENT_AUTH=post).'
+    : 'This token endpoint may want an HTTP Basic header instead. Retry with `--client-auth basic` (or ASOR_CLIENT_AUTH=basic).';
+}
 type Env = Record<string, string | undefined>;
 
 export interface TokenInfo {
@@ -102,14 +136,10 @@ export class TokenProvider {
       throw new CliError('config', `Missing ${missing.join(', ')}.`, { hint: 'Run `asor login`, or set the ASOR_* environment variables. See the README section "Tenant setup".' });
     }
 
-    const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken! });
+    const { headers, body } = tokenRequest(this.cfg.clientAuth, clientId!, clientSecret!, { grant_type: 'refresh_token', refresh_token: refreshToken! });
     const res = await this.fetchImpl(tokenUrl, {
       method: 'POST',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json',
-      },
+      headers,
       body,
       signal: AbortSignal.timeout(30_000),
     });
@@ -126,13 +156,14 @@ export class TokenProvider {
       const reason = json.error_description ?? json.error ?? (text.slice(0, 200) || res.statusText);
       const reauth = `Run \`asor login --authorize --profile ${this.cfg.profileName}\` to sign in to Workday again.`;
       const hint =
-        json.error === 'invalid_grant' && this.cfg.authMode === 'authorization_code'
+        clientAuthHint(this.cfg.clientAuth, `${json.error ?? ''} ${text}`) ??
+        (json.error === 'invalid_grant' && this.cfg.authMode === 'authorization_code'
           ? `The refresh token expired or was revoked${this.cfg.refreshTokenTtlDays ? ` (this client's tokens last ${this.cfg.refreshTokenTtlDays} days)` : ''}. ${reauth}`
           : res.status === 400 || res.status === 401
           ? 'The refresh token or client credentials were rejected. Generate a new refresh token for the integration user, check the client id/secret, and confirm the token URL (see `asor whoami`).'
           : res.status === 404
             ? 'Token endpoint not found. Check the host and tenant alias, or set ASOR_TOKEN_URL (e.g. https://{host}/ccx/oauth2/{tenant}/token).'
-            : undefined;
+            : undefined);
       throw new CliError('auth', `Token exchange failed (HTTP ${res.status}): ${reason}`, { status: res.status, ...(hint ? { hint } : {}) });
     }
 

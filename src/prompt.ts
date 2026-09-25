@@ -5,20 +5,24 @@ export function ask(question: string, opts: { secret?: boolean; defaultValue?: s
   return new Promise((resolve, reject) => {
     const rl = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
     const suffix = opts.defaultValue ? ` [${opts.defaultValue}]` : '';
+    const prompt = `${question}${suffix}: `;
     let muted = false;
     if (opts.secret) {
-      // readline has no built-in hidden input; swallow the echo after the question is printed.
+      // readline has no built-in hidden input, so filter what it echoes. On every keypress readline clears the line
+      // and redraws "prompt + typed text"; keep redrawing the prompt alone so it stays visible, never the text.
       const internal = rl as unknown as { _writeToOutput: (s: string) => void };
       const original = internal._writeToOutput.bind(rl);
       internal._writeToOutput = (s: string) => {
-        if (!muted || s.includes('\n')) original(muted ? '\n' : s);
+        if (!muted) original(s);
+        else if (s.includes('\n')) original('\n');
+        else if (s.startsWith(prompt)) original(prompt);
       };
     }
     rl.on('SIGINT', () => {
       rl.close();
       reject(new Error('Cancelled.'));
     });
-    rl.question(`${question}${suffix}: `, (answer) => {
+    rl.question(prompt, (answer) => {
       rl.close();
       resolve(answer.trim() || opts.defaultValue || '');
     });

@@ -32,6 +32,8 @@ export interface Profile {
   authorizedAt?: string;
   /** Refresh token lifetime in days, from Workday's response or `--refresh-ttl-days`. Informational. */
   refreshTokenTtlDays?: number;
+  /** Token-endpoint client authentication: `post` (default; form body) or `basic` (HTTP Basic header). */
+  clientAuth?: 'post' | 'basic';
 }
 
 export interface ConfigFile {
@@ -60,6 +62,7 @@ export interface ResolvedConfig {
   authMode: 'refresh_token' | 'authorization_code';
   authorizedAt: string | undefined;
   refreshTokenTtlDays: number | undefined;
+  clientAuth: 'post' | 'basic';
 }
 
 type Env = Record<string, string | undefined>;
@@ -168,7 +171,13 @@ export function resolveConfig(opts: { profile?: string; env?: Env } = {}): Resol
     authMode: saved.authMode ?? 'refresh_token',
     authorizedAt: saved.authorizedAt,
     refreshTokenTtlDays: saved.refreshTokenTtlDays,
+    clientAuth: parseClientAuthValue(env.ASOR_CLIENT_AUTH ?? saved.clientAuth ?? 'post'),
   };
+}
+
+function parseClientAuthValue(value: string): 'post' | 'basic' {
+  if (value === 'post' || value === 'basic') return value;
+  throw new CliError('config', `Unknown client auth method "${value}".`, { hint: 'Set ASOR_CLIENT_AUTH (or --client-auth) to post or basic.' });
 }
 
 export function parseAgentAuth(value: string): AgentAuthMode {

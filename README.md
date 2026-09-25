@@ -154,14 +154,15 @@ ASOR-scoped API clients use the Authorization Code grant, so `asor` signs in the
 2. **Register an API client** (*Register API Client*):
    - **Grant type:** Authorization Code.
    - **Access token type:** Bearer.
-   - **Redirection URI:** `http://localhost:8765/callback`. asor receives it automatically. If your tenant only accepts HTTPS callbacks, use `https://cb.myworkday.com/cb1` and paste the address when asked.
+   - **Redirection URI:** `https://localhost:8765/callback`. Workday requires https for confidential clients. Nothing needs to listen there: after you approve, the browser shows a "can't connect" page, and you paste its address (which carries the code) into the terminal. The redirect is handled by *your browser*, never by Workday's servers, so this works even when asor runs on a headless server. If your client allows `http://localhost:<port>/…`, asor catches the code automatically instead.
    - **Refresh token timeout:** 30 days, or whatever your policy allows.
    - **Scope:** **Agent System of Record**.
    - **Include Workday Owned Scope:** Yes.
+   - **Leave "Support PKCE" unchecked.** Checking it turns the client into a public client, and Workday then hides the refresh-token settings. asor still sends a PKCE challenge, and the agent host accepts it.
 3. **Sign in** with the command below. It opens Workday in your browser. Sign in, check that the consent screen lists the ASOR access you expect, and click **Allow**. asor then exchanges the code (with PKCE), saves the refresh token to your profile, and verifies it with a live ASOR call.
 
    ```bash
-   asor login --authorize --profile prod --tenant <alias> --refresh-ttl-days 30
+   asor login --authorize --profile prod --tenant <alias> --redirect-uri https://localhost:8765/callback --refresh-ttl-days 30
    ```
 4. **Check it** with `asor whoami`. It shows when you signed in and roughly when the refresh token expires. When it expires, run `asor login --authorize` again. Everything else in the profile is kept.
 
@@ -172,6 +173,7 @@ Useful flags:
 | `--redirect-uri <uri>` | You registered a different callback. It must match the client exactly. |
 | `--paste` | You want to paste the landing address even for a localhost callback. |
 | `--no-pkce` | Your tenant rejects the PKCE challenge. |
+| `--client-auth basic` | Your token endpoint wants an HTTP Basic header. The default, `post`, sends `client_id`/`client_secret` in the form body, which Workday's agent host requires. |
 | `--authorize-url <url>` | Your authorize endpoint differs from the default. |
 
 ### Alternative: an existing refresh token
@@ -198,6 +200,7 @@ Bots usually run on environment variables alone, with no config file. The variab
 | `ASOR_PROFILE`, `ASOR_CONFIG_DIR` | Profile selection and config location. The config lives in `%APPDATA%\asor-cli` on Windows and `~/.config/asor-cli` elsewhere. |
 | `ASOR_AGENT_AUTH`, `ASOR_AGENT_TOKEN` | Credential for agent endpoints |
 | `ASOR_NO_TOKEN_CACHE=1` | Turns off the on-disk access-token cache |
+| `ASOR_CLIENT_AUTH` | `post` (default) or `basic`: how the client authenticates to the token endpoint |
 
 ## How invocation works
 

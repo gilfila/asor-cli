@@ -34,6 +34,11 @@ export interface MockOptions {
   denyAuthorize?: boolean;
   /** Lifetime reported as refresh_token_expires_in on authorization-code grants. */
   refreshTokenExpiresIn?: number;
+  /**
+   * Which token-endpoint client authentication to accept. `post` mimics Workday's agent host, which answers a
+   * Basic-header-only request with `{"error": "Invalid request"}`. Default: `either`.
+   */
+  clientAuth?: 'post' | 'basic' | 'either';
 }
 
 export interface MockState {
@@ -128,9 +133,14 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
 
   const handleToken = async (req: IncomingMessage, res: ServerResponse, tenant: string) => {
     const body = new URLSearchParams(await readBody(req));
-    const basic = Buffer.from((req.headers.authorization ?? '').replace(/^Basic /, ''), 'base64').toString();
     if (tenant !== MOCK_TENANT) return send(res, 404, { error: 'invalid_tenant' });
-    if (basic !== `${MOCK_CLIENT_ID}:${MOCK_CLIENT_SECRET}`) return send(res, 401, { error: 'invalid_client' });
+    const header = req.headers.authorization ?? '';
+    const viaBasic = header.startsWith('Basic ') ? Buffer.from(header.slice(6), 'base64').toString() : undefined;
+    const viaPost = body.has('client_id') ? `${body.get('client_id')}:${body.get('client_secret') ?? ''}` : undefined;
+    const mode = opts.clientAuth ?? 'either';
+    const presented = mode === 'post' ? viaPost : mode === 'basic' ? viaBasic : (viaPost ?? viaBasic);
+    if (presented === undefined) return send(res, 400, { error: 'Invalid request' });
+    if (presented !== `${MOCK_CLIENT_ID}:${MOCK_CLIENT_SECRET}`) return send(res, 401, { error: 'invalid_client' });
     if (body.get('grant_type') === 'authorization_code') {
       const code = body.get('code') ?? '';
       const grant = codes.get(code);

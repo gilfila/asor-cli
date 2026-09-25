@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
-import type { FetchLike } from './auth.js';
+import { clientAuthHint, tokenRequest, type ClientAuthMethod, type FetchLike } from './auth.js';
 import { CliError } from './errors.js';
 import { openBrowser } from './open.js';
 
@@ -157,16 +157,26 @@ export interface CodeExchangeResult {
   refreshTokenExpiresIn?: number;
 }
 
-export async function exchangeCode(p: { tokenUrl: string; clientId: string; clientSecret: string; code: string; redirectUri: string; verifier?: string; fetch?: FetchLike }): Promise<CodeExchangeResult> {
-  const body = new URLSearchParams({ grant_type: 'authorization_code', code: p.code, redirect_uri: p.redirectUri });
-  if (p.verifier) body.set('code_verifier', p.verifier);
+export async function exchangeCode(p: {
+  tokenUrl: string;
+  clientId: string;
+  clientSecret: string;
+  code: string;
+  redirectUri: string;
+  verifier?: string;
+  clientAuth?: ClientAuthMethod;
+  fetch?: FetchLike;
+}): Promise<CodeExchangeResult> {
+  const clientAuth = p.clientAuth ?? 'post';
+  const { headers, body } = tokenRequest(clientAuth, p.clientId, p.clientSecret, {
+    grant_type: 'authorization_code',
+    code: p.code,
+    redirect_uri: p.redirectUri,
+    ...(p.verifier ? { code_verifier: p.verifier } : {}),
+  });
   const res = await (p.fetch ?? fetch)(p.tokenUrl, {
     method: 'POST',
-    headers: {
-      Authorization: `Basic ${Buffer.from(`${p.clientId}:${p.clientSecret}`).toString('base64')}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
+    headers,
     body,
     signal: AbortSignal.timeout(30_000),
   });
@@ -181,7 +191,9 @@ export async function exchangeCode(p: { tokenUrl: string; clientId: string; clie
     const reason = (json.error_description as string) ?? (json.error as string) ?? (text.slice(0, 200) || res.statusText);
     throw new CliError('auth', `Exchanging the authorization code failed (HTTP ${res.status}): ${reason}`, {
       status: res.status,
-      hint: 'Check the client secret and that the redirect URI matches the API client exactly. Codes are single-use and expire quickly, so start over with `asor login --authorize`.',
+      hint:
+        clientAuthHint(clientAuth, `${json.error ?? ''} ${text}`) ??
+        'Check the client secret and that the redirect URI matches the API client exactly. Codes are single-use and expire quickly, so start over with `asor login --authorize`.',
     });
   }
   if (typeof json.refresh_token !== 'string') {
@@ -213,6 +225,7 @@ export interface AuthorizeFlowOptions {
   log: (message: string) => void;
   /** Reads one pasted line from the user. */
   readPasted: (prompt: string) => Promise<string>;
+  clientAuth?: ClientAuthMethod;
   fetch?: FetchLike;
 }
 
@@ -252,6 +265,7 @@ export async function runAuthorizeFlow(o: AuthorizeFlowOptions): Promise<CodeExc
     code,
     redirectUri: o.redirectUri,
     ...(pkce ? { verifier: pkce.verifier } : {}),
+    ...(o.clientAuth ? { clientAuth: o.clientAuth } : {}),
     ...(o.fetch ? { fetch: o.fetch } : {}),
   });
 }

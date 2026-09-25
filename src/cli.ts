@@ -3,7 +3,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs, type ParseArgsConfig } from 'node:util';
-import { TokenProvider } from './auth.js';
+import { parseClientAuth, TokenProvider } from './auth.js';
 import { configPath, DEFAULT_HOST, DEFAULT_PROFILE, mask, normalizeOrigin, readConfigFile, removeProfile, resolveConfig, saveProfile, type Profile } from './config.js';
 import { configLocationEnv, createContext, reportError, stderr, stdout, verifySavedProfile, type GlobalFlags } from './context.js';
 import { CliError, ExitCode, toCliError } from './errors.js';
@@ -92,6 +92,8 @@ Options:
   --from-env              Take values from the ASOR_* environment variables
   --default               Make this the default profile
   --no-verify             Save without testing the credentials
+  --client-auth <m>       How the client authenticates to the token endpoint: post (default; client_id and
+                          client_secret in the form body, required by Workday's agent host) or basic (HTTP Basic)
 
 Options for --authorize:
   --redirect-uri <uri>    Must match the API client exactly (default ${DEFAULT_REDIRECT_URI}).
@@ -222,6 +224,7 @@ async function cmdLogin(args: string[]): Promise<number> {
     'no-open': { type: 'boolean' },
     scope: { type: 'string' },
     'refresh-ttl-days': { type: 'string' },
+    'client-auth': { type: 'string' },
   });
   if (values.help) return stdout(HELP_LOGIN), ExitCode.OK;
 
@@ -237,6 +240,7 @@ async function cmdLogin(args: string[]): Promise<number> {
     refreshToken: authorize ? undefined : (values['refresh-token'] ?? env.ASOR_REFRESH_TOKEN ?? existing.refreshToken),
     tokenUrl: values['token-url'] ?? env.ASOR_TOKEN_URL ?? existing.tokenUrl,
     asorBaseUrl: values['base-url'] ?? env.ASOR_BASE_URL ?? existing.asorBaseUrl,
+    clientAuth: parseClientAuth(values['client-auth'] ?? env.ASOR_CLIENT_AUTH ?? existing.clientAuth ?? 'post'),
   };
 
   const interactive = Boolean(process.stdin.isTTY);
@@ -282,6 +286,7 @@ async function cmdLogin(args: string[]): Promise<number> {
       paste: Boolean(values.paste),
       log: (m) => stderr(m),
       readPasted: (q) => readLine(q),
+      clientAuth: profile.clientAuth ?? 'post',
     });
     const ttlDays = ttlFlag ?? (grant.refreshTokenExpiresIn ? Math.round(grant.refreshTokenExpiresIn / 86400) : existing.refreshTokenTtlDays);
     Object.assign(profile, {

@@ -8,6 +8,8 @@
 - **Refresh-token expiry:** `asor whoami` shows the auth mode, when you signed in, and when the refresh token expires. An expired token (`invalid_grant`) now tells you to re-run `asor login --authorize`.
 - **`agents list|get --json --redact`:** replaces ids, URLs, and names with stable placeholders, so live payloads can be shared or kept as test fixtures.
 - **Browser opening on Windows:** it now uses the URL protocol handler rather than `cmd /c start`, so OAuth query strings are no longer mangled.
+- **Token requests now send client credentials in the form body (`client_secret_post`) by default.** Workday's agent host rejects an HTTP Basic header alone with `{"error": "Invalid request"}`, which the first live sign-in against a real tenant hit. `--client-auth basic` / `ASOR_CLIENT_AUTH=basic` switches back, and a 400 `Invalid request` now suggests the other method.
+- **The secret prompt no longer disappears on Windows** once you start typing.
 - **Mock tenant:** it now supports `/auth/authorize/{tenant}` and the `authorization_code` grant, with PKCE and redirect-URI checks.
 
 ## 0.2.0 — 2026-09-24
