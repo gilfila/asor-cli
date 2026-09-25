@@ -85,6 +85,8 @@ The UI was verified visually in both light and dark mode against the mock tenant
   - 429 rate limits
   - 401 for an unknown id
   - a `workdayConfig` entry per skill is required to register (auto-filled)
+- **Second tenant `hack116_wcpdev1` also works** (profile `hack116`). The link Tony gave, `hack116_wcpdev`, is an invalid URL; the real alias has a trailing 1. The echo agent is registered there as id `83252e5f50d1100208bccf05151e0000` and shows as Inactive in Agent Registry.
+- **The ASOR API lists only externally registered agents.** Workday-built agents (Self-Service, Payroll, Planning) show in the Hub, not in `/agentDefinition`.
 - 79 tests pass.
 - **Remaining optional phases:**
   - Phase 7: the Slack example against the generated CLI. Tony provides Slack tokens.

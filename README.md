@@ -217,7 +217,7 @@ ASOR agent definitions are A2A **Agent Cards**. The CLI takes the card's `url`, 
 - `tasks/get` polling for long-running tasks,
 - `message/stream` when you pass `--stream`.
 
-Agents with no callable endpoint are still listed, with `invocable: no`. This typically means Workday-built agents that run inside the tenant. The invoker is behind a small interface, so other transports can be added later (Workday Agent Gateway, MCP).
+**Workday's own agents do not appear in the API.** The ASOR API (`GET /asor/v1/agentDefinition`) returns only **externally registered** agents: those registered through the API, like [`examples/echo-agent`](examples/echo-agent). Workday's own agents (Self-Service, Payroll, Planning, …) show in *Agent Management Hub → Agent Registry* but not in the API, and they run inside Workday, so `asor agents list` can show 0 while the Hub shows several. Agents that are registered but have no callable endpoint are still listed, with `invocable: no`. This typically means Workday-built agents that run inside the tenant. The invoker is behind a small interface, so other transports can be added later (Workday Agent Gateway, MCP).
 
 ## Security
 
