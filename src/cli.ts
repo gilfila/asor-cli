@@ -43,7 +43,7 @@ Global options:
   --version            Print the version
 
 Environment (overrides the saved profile, so bots need no config file):
-  ASOR_HOST ASOR_TENANT ASOR_CLIENT_ID ASOR_CLIENT_SECRET ASOR_REFRESH_TOKEN
+  ASOR_HOST ASOR_TENANT ASOR_CLIENT_ID ASOR_CLIENT_SECRET ASOR_REFRESH_TOKEN ASOR_REFRESH_TOKEN_FILE
   ASOR_TOKEN_URL ASOR_BASE_URL ASOR_ACCESS_TOKEN ASOR_PROFILE ASOR_CONFIG_DIR
   ASOR_AGENT_AUTH ASOR_AGENT_TOKEN ASOR_NO_TOKEN_CACHE
 
@@ -307,7 +307,7 @@ async function cmdLogin(args: string[]): Promise<number> {
   }
   if (values['no-verify']) return ExitCode.OK;
 
-  const verified = await verifySavedProfile(name);
+  const verified = await verifySavedProfile(name, { forceRefresh: !authorize });
   stderr(`Connected to tenant "${verified.tenant}". ${verified.agents} agent(s) visible.`);
   if (values.json) printJson({ ok: true, profile: name, tenant: verified.tenant, agents: verified.agents });
   return ExitCode.OK;

@@ -137,7 +137,7 @@ export function surfaceSnippets(result: WrapResult, opts: { tenant?: string; pro
       description: opts.profile
         ? `The CLI uses the saved asor profile "${opts.profile}" on this machine. Anywhere else, set these instead:`
         : 'The CLI reads the saved asor profile on this machine. On a server or bot host, set these instead:',
-      code: `ASOR_TENANT=${opts.tenant ?? '<tenant alias>'}\nASOR_CLIENT_ID=<api client id>\nASOR_CLIENT_SECRET=<api client secret>\nASOR_REFRESH_TOKEN=<refresh token>\n# ASOR_HOST=us.agent.workday.com`,
+      code: `ASOR_TENANT=${opts.tenant ?? '<tenant alias>'}\nASOR_CLIENT_ID=<api client id>\nASOR_CLIENT_SECRET=<api client secret>\nASOR_REFRESH_TOKEN_FILE=/var/lib/asor/refresh-token   # writable: Workday rotates the token on every refresh\n# ASOR_HOST=us.agent.workday.com`,
     },
     {
       surface: 'Slack',
@@ -285,7 +285,8 @@ It uses the same settings as \`asor\`, which is either:
 - environment variables. This is the usual choice for bots:
 
 \`\`\`bash
-export ASOR_TENANT=... ASOR_CLIENT_ID=... ASOR_CLIENT_SECRET=... ASOR_REFRESH_TOKEN=...
+export ASOR_TENANT=... ASOR_CLIENT_ID=... ASOR_CLIENT_SECRET=...
+export ASOR_REFRESH_TOKEN_FILE=/path/to/refresh-token   # writable; Workday rotates the token on every refresh
 # optional: ASOR_HOST (default us.agent.workday.com), ASOR_AGENT_AUTH=none|workday|bearer
 \`\`\`
 

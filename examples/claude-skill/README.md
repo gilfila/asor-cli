@@ -14,7 +14,7 @@ mkdir -p .claude/skills/benefits-helper
 cp ./tools/benefits-helper/SKILL.md .claude/skills/benefits-helper/SKILL.md
 ```
 
-Set `ASOR_TENANT`, `ASOR_CLIENT_ID`, `ASOR_CLIENT_SECRET`, and `ASOR_REFRESH_TOKEN` in the agent's environment, or run `asor login` once on the machine.
+Run `asor login --authorize` once on the machine, which is the simplest option. Otherwise, set `ASOR_TENANT`, `ASOR_CLIENT_ID`, `ASOR_CLIENT_SECRET`, and `ASOR_REFRESH_TOKEN_FILE` in the agent's environment. The token file must be writable, because Workday rotates the refresh token on every refresh.
 
 When Claude decides the task needs that agent, it runs `printf '%s' "..." | benefits-helper ask --json` and reads the JSON envelope. [`SKILL.md.example`](SKILL.md.example) shows what `asor wrap` generates for the mock "Echo Agent".
 

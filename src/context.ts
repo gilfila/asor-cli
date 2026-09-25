@@ -50,13 +50,17 @@ export function configLocationEnv(): Record<string, string | undefined> {
  * Tests a saved profile exactly as stored, ignoring ASOR_* credential overrides, so `login` verifies what the user
  * just typed rather than whatever the environment happens to hold. Returns the number of visible agents.
  */
-export async function verifySavedProfile(profile: string, opts: { fetch?: FetchLike } = {}): Promise<{ tenant: string; agents: number }> {
+export async function verifySavedProfile(profile: string, opts: { fetch?: FetchLike; forceRefresh?: boolean } = {}): Promise<{ tenant: string; agents: number }> {
   const locationOnly = configLocationEnv();
   const cfg = resolveConfig({ profile, env: locationOnly });
   const fetchImpl = opts.fetch ?? fetch;
   const tokens = new TokenProvider(cfg, { fetch: fetchImpl, env: locationOnly });
-  tokens.invalidate();
-  await tokens.getToken({ forceRefresh: true });
+  // A pasted refresh token must be proven by exchanging it. After --authorize we already hold a fresh access token,
+  // and an immediate second exchange only invites the token endpoint's rate limit.
+  if (opts.forceRefresh ?? true) {
+    tokens.invalidate();
+    await tokens.getToken({ forceRefresh: true });
+  }
   const agents = await new AsorClient(cfg, tokens, { fetch: fetchImpl }).listAgents();
   return { tenant: cfg.tenant, agents: agents.length };
 }

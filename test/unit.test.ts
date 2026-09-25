@@ -146,3 +146,47 @@ describe('version', () => {
     assert.equal(VERSION, pkg.version);
   });
 });
+
+describe('withLock', () => {
+  it('serializes callers and clears an abandoned lock', async () => {
+    const { withLock } = await import('../src/auth.js');
+    const { utimesSync, writeFileSync: write } = await import('node:fs');
+    const { join } = await import('node:path');
+    const path = join(tempDir(), 'x.lock');
+    const order: string[] = [];
+    await Promise.all([
+      withLock(path, async () => { order.push('a+'); await new Promise((r) => setTimeout(r, 50)); order.push('a-'); }),
+      withLock(path, async () => { order.push('b+'); order.push('b-'); }),
+    ]);
+    assert.ok(order.join(',') === 'a+,a-,b+,b-' || order.join(',') === 'b+,b-,a+,a-', order.join(','));
+    write(path, '');
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(path, old, old);
+    let ran = false;
+    await withLock(path, async () => { ran = true; });
+    assert.ok(ran);
+  });
+});
+
+describe('fetchWithRetry', () => {
+  it('retries transient connection failures and 429s, but not other errors', async () => {
+    const { fetchWithRetry } = await import('../src/http.js');
+    process.env.ASOR_RETRY_BASE_MS = '1';
+    const connectTimeout = Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } });
+    let calls = 0;
+    const flaky = (async () => {
+      calls += 1;
+      if (calls === 1) throw connectTimeout;
+      if (calls === 2) return new Response('{}', { status: 429, headers: { 'Retry-After': '0' } });
+      return new Response('ok', { status: 200 });
+    }) as typeof fetch;
+    const res = await fetchWithRetry(flaky, 'https://example.test/x', { method: 'GET' });
+    assert.equal(res.status, 200);
+    assert.equal(calls, 3);
+
+    const hardFail = (async () => {
+      throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'CERT_HAS_EXPIRED' } });
+    }) as typeof fetch;
+    await assert.rejects(fetchWithRetry(hardFail, 'https://example.test/x', { method: 'GET' }), /fetch failed/);
+  });
+});

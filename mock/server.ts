@@ -39,6 +39,8 @@ export interface MockOptions {
    * Basic-header-only request with `{"error": "Invalid request"}`. Default: `either`.
    */
   clientAuth?: 'post' | 'basic' | 'either';
+  /** Answer this many token requests with 429 (Retry-After: 0) before serving them, like Workday's rate limit. */
+  tokenRateLimit?: number;
 }
 
 export interface MockState {
@@ -75,6 +77,7 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
     lastIssuedRefreshToken: MOCK_REFRESH_TOKEN,
     authorizeRequests: [],
   };
+  let rateLimited = 0;
   const codes = new Map<string, { redirectUri: string; challenge: string | null }>();
   let origin = '';
   const agents: Card[] = [];
@@ -134,6 +137,11 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
   const handleToken = async (req: IncomingMessage, res: ServerResponse, tenant: string) => {
     const body = new URLSearchParams(await readBody(req));
     if (tenant !== MOCK_TENANT) return send(res, 404, { error: 'invalid_tenant' });
+    if (rateLimited < (opts.tokenRateLimit ?? 0)) {
+      rateLimited += 1;
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '0' });
+      return res.end(JSON.stringify({ error: 'too_many_requests' }));
+    }
     const header = req.headers.authorization ?? '';
     const viaBasic = header.startsWith('Basic ') ? Buffer.from(header.slice(6), 'base64').toString() : undefined;
     const viaPost = body.has('client_id') ? `${body.get('client_id')}:${body.get('client_secret') ?? ''}` : undefined;
@@ -233,7 +241,8 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
     const m = /^\/agentDefinition\/([^/]+)$/.exec(path);
     if (m && req.method === 'GET') {
       const agent = agents.find((a) => a.id === decodeURIComponent(m[1]!));
-      return agent ? send(res, 200, agent) : send(res, 404, { error: 'Agent definition not found' });
+      // Live ASOR answers 401, not 404, for an id that does not exist or is not visible.
+      return agent ? send(res, 200, agent) : send(res, 401, { error: 'Unauthorized' });
     }
     send(res, 404, { error: 'not found' });
   };

@@ -17,7 +17,7 @@ This is an open-source tool, public at **github.com/gilfila/asor-cli**, that **g
 ## Run / Build / Test
 ```bash
 npm install          # also builds (prepare)
-npm test             # clean + build + node --test dist/test/**/*.test.js  (66 tests)
+npm test             # clean + build + node --test dist/test/**/*.test.js  (76 tests)
 npm run build && node dist/src/cli.js ui   # the picker (needs ASOR_* or a saved profile; npm run mock for a fake tenant)
 npm run mock         # fake tenant on :4010; prints the ASOR_* env to export
 node examples/shared/demo.mjs   # bot-runner end-to-end against the mock
@@ -75,7 +75,16 @@ The UI was verified visually in both light and dark mode against the mock tenant
 
 **Also:** the README was reframed with a screenshot at `docs/asor-ui.png`, the version is 0.2.0, and there are 54 green tests.
 
-**Phase 0 of the live-tenant rollout is done (2026-09-24).** `asor login --authorize` now exists (Authorization Code + PKCE, localhost callback or paste mode). whoami shows when the refresh token expires, `--redact` was added, and 66 tests pass. `asor` is `npm link`ed on Tony's PC. **Next:** Phase 1, where Tony signs in to `wday_wcpdev8` in the browser pane.
+**Live-tenant rollout, Phases 0–4 are done (2026-09-25).**
+- **Login:** Tony registered the `asor-cli` API client in `wday_wcpdev8` (Authorization Code, PKCE off, https://localhost:8765/callback, 30-day refresh, ASOR scope). `asor login --authorize` works in paste mode, and `asor whoami` passes against live ASOR. The registry is empty.
+- **Live quirks, now handled:**
+  - The token endpoint needs `client_secret_post` (the default now; `--client-auth basic` is the fallback).
+  - It rate-limits (retry with Retry-After).
+  - Refresh tokens **rotate on every exchange**. A `refresh.lock` serializes refreshes, and bot hosts use `ASOR_REFRESH_TOKEN_FILE`.
+  - An unknown agent id returns 401, which is mapped to not_found.
+  - The list shape is `{total, data}`.
+- 76 tests pass.
+- **Next:** Phase 5. Tony picks the hosting for a callable test agent and approves registering it. The registry is empty, and the "Unregistered Workday Agents" page shows "Registration services currently unavailable".
 
 **The live-tenant rollout (direct ASOR, no Orchestrate).** The checklist is in `LIVE_TENANT_PLAN.md`. It is gitignored because it names the tenant. Tick it as you go.
 

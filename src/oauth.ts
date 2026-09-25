@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { clientAuthHint, tokenRequest, type ClientAuthMethod, type FetchLike } from './auth.js';
 import { CliError } from './errors.js';
+import { fetchWithRetry } from './http.js';
 import { openBrowser } from './open.js';
 
 /**
@@ -174,12 +175,7 @@ export async function exchangeCode(p: {
     redirect_uri: p.redirectUri,
     ...(p.verifier ? { code_verifier: p.verifier } : {}),
   });
-  const res = await (p.fetch ?? fetch)(p.tokenUrl, {
-    method: 'POST',
-    headers,
-    body,
-    signal: AbortSignal.timeout(30_000),
-  });
+  const res = await fetchWithRetry(p.fetch ?? fetch, p.tokenUrl, { method: 'POST', headers, body });
   const text = await res.text();
   let json: Record<string, unknown> = {};
   try {

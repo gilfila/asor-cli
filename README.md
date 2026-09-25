@@ -79,7 +79,7 @@ benefits-helper info       # the agent's live ASOR definition
 benefits-helper skills     # works offline
 ```
 
-At runtime, the CLI looks up its agent in ASOR by id (falling back to its name if the agent was re-registered) and calls it over A2A. It reads the same credentials as `asor`: either a saved profile, or `ASOR_TENANT`, `ASOR_CLIENT_ID`, `ASOR_CLIENT_SECRET`, and `ASOR_REFRESH_TOKEN` on a bot host. **No credentials are ever written into the generated package.**
+At runtime, the CLI looks up its agent in ASOR by id (falling back to its name if the agent was re-registered) and calls it over A2A. It reads the same credentials as `asor`: either a saved profile, or `ASOR_TENANT`, `ASOR_CLIENT_ID`, `ASOR_CLIENT_SECRET`, and `ASOR_REFRESH_TOKEN_FILE` on a bot host. **No credentials are ever written into the generated package.**
 
 ### The bot contract
 
@@ -184,9 +184,13 @@ If your tenant uses a different token endpoint, such as the classic `https://{ho
 
 ### Refresh tokens on bot hosts
 
-If Workday **rotates** the refresh token, `asor` saves the new one to your profile. When the token came from `ASOR_REFRESH_TOKEN` instead, the new one can't be saved, so asor prints a warning and you have to update the secret yourself.
+**Workday rotates the refresh token on every exchange and revokes the old one.** `asor` handles this:
 
-Refresh tokens from the browser sign-in also **expire** (30 days by default). When that happens a bot gets exit code 3 with a "sign in again" hint. Plan a periodic `asor login --authorize` on the machine that holds the profile, or give the bot host a fresh `ASOR_REFRESH_TOKEN`.
+- **Saved profiles.** The new token is written back to the profile. Refreshes are serialized with a lock file, so parallel invocations (say, a bot answering several messages at once) don't spend each other's token. Whoever waited reuses the fresh access token instead.
+- **`ASOR_REFRESH_TOKEN_FILE=/path/to/file`.** This is the bot-host option. asor reads the refresh token from that file and rewrites it on every rotation. The file must be writable and persistent (a mounted volume, not an image layer). Seed it once, for example with the `refreshToken` from a profile created by `asor login --authorize`.
+- **`ASOR_REFRESH_TOKEN`** (plain env var). This works only until the first refresh: the rotated token can't be saved, so asor warns and the old one stops working. Use it only for one-off runs.
+
+Refresh tokens from the browser sign-in also **expire** (30 days by default). When that happens a bot gets exit code 3 with a "sign in again" hint. Re-run `asor login --authorize` on the machine that holds the profile, then re-seed the token file if you use one.
 
 ### Environment variables
 
@@ -194,7 +198,9 @@ Bots usually run on environment variables alone, with no config file. The variab
 
 | Variable | |
 |---|---|
-| `ASOR_TENANT`, `ASOR_CLIENT_ID`, `ASOR_CLIENT_SECRET`, `ASOR_REFRESH_TOKEN` | Credentials |
+| `ASOR_TENANT`, `ASOR_CLIENT_ID`, `ASOR_CLIENT_SECRET` | Credentials |
+| `ASOR_REFRESH_TOKEN_FILE` | A writable file holding the refresh token, rewritten on every rotation. **Use this on bot hosts.** |
+| `ASOR_REFRESH_TOKEN` | Refresh token as a plain value. It only works until the first rotation. |
 | `ASOR_HOST`, `ASOR_TOKEN_URL`, `ASOR_BASE_URL` | Endpoints |
 | `ASOR_ACCESS_TOKEN` | A pre-minted token. The exchange is skipped. |
 | `ASOR_PROFILE`, `ASOR_CONFIG_DIR` | Profile selection and config location. The config lives in `%APPDATA%\asor-cli` on Windows and `~/.config/asor-cli` elsewhere. |

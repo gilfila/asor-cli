@@ -246,3 +246,83 @@ describe('login and profiles', () => {
     }
   });
 });
+
+describe('live ASOR quirks (captured from a real tenant, 2026-09-25)', () => {
+  it('parses the live list shape', async () => {
+    const { extractList } = await import('../src/asor.js');
+    const live = JSON.parse(readFileSync(new URL('../../test/fixtures/asor-v1-list-empty.json', import.meta.url), 'utf8'));
+    assert.deepEqual(extractList(live), { items: [], total: 0 });
+  });
+
+  it('treats a 401 for an unknown agent id as not found, without spending token exchanges', async () => {
+    const mock = await startMockServer();
+    try {
+      const env = { ...mock.env, ASOR_CONFIG_DIR: tempDir() };
+      await runCli(['agents', 'list', '--json'], { env });
+      const exchanges = mock.state.tokenExchanges;
+      const r = await runCli(['agents', 'get', '0'.repeat(32), '--json'], { env });
+      assert.equal(r.code, 4, r.stdout);
+      assert.equal(JSON.parse(r.stdout).error.kind, 'not_found');
+      assert.equal(mock.state.tokenExchanges - exchanges, 1, 'one forced refresh for the cached token, then no more');
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it('rides out a rate-limited token endpoint', async () => {
+    const mock = await startMockServer({ tokenRateLimit: 2 });
+    try {
+      const r = await runCli(['agents', 'list', '--json'], { env: { ...mock.env, ASOR_CONFIG_DIR: tempDir() } });
+      assert.equal(r.code, 0, r.stderr);
+      assert.match(r.stderr, /rate limiting \(HTTP 429\); retrying/);
+      assert.equal(JSON.parse(r.stdout).length, 3);
+    } finally {
+      await mock.close();
+    }
+  });
+});
+
+describe('rotating refresh tokens (Workday rotates on every exchange)', () => {
+  it('serializes refreshes so parallel processes do not burn each other\'s token', async () => {
+    const mock = await startMockServer({ rotateRefreshToken: true });
+    try {
+      const dir = tempDir();
+      saveProfile('p', { host: mock.url, tenant: MOCK_TENANT, clientId: MOCK_CLIENT_ID, clientSecret: MOCK_CLIENT_SECRET, refreshToken: MOCK_REFRESH_TOKEN }, { env: { ASOR_CONFIG_DIR: dir } });
+      const runs = await Promise.all(Array.from({ length: 5 }, () => runCli(['agents', 'list', '--json'], { env: { ASOR_CONFIG_DIR: dir } })));
+      for (const r of runs) assert.equal(r.code, 0, r.stderr);
+      assert.equal(mock.state.tokenExchanges, 1, 'one exchange; the others reused its token');
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it('keeps an ASOR_REFRESH_TOKEN_FILE up to date for bot hosts', async () => {
+    const mock = await startMockServer({ rotateRefreshToken: true });
+    try {
+      const file = join(tempDir(), 'refresh-token');
+      writeFileSync(file, `${MOCK_REFRESH_TOKEN}\n`);
+      const env = { ...mock.env, ASOR_REFRESH_TOKEN: '', ASOR_REFRESH_TOKEN_FILE: file, ASOR_CONFIG_DIR: tempDir(), ASOR_NO_TOKEN_CACHE: '1' };
+      delete (env as Record<string, string | undefined>).ASOR_REFRESH_TOKEN;
+      for (let i = 0; i < 3; i++) {
+        const r = await runCli(['agents', 'list', '--json'], { env });
+        assert.equal(r.code, 0, r.stderr);
+        assert.doesNotMatch(r.stderr, /could not be saved/);
+      }
+      assert.equal(readFileSync(file, 'utf8').trim(), mock.state.lastIssuedRefreshToken);
+      assert.equal(mock.state.tokenExchanges, 3);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it('warns that an env-only refresh token will die after rotation', async () => {
+    const mock = await startMockServer({ rotateRefreshToken: true });
+    try {
+      const r = await runCli(['agents', 'list', '--json'], { env: { ...mock.env, ASOR_CONFIG_DIR: tempDir() } });
+      assert.equal(r.code, 0, r.stderr);
+      assert.match(r.stderr, /ASOR_REFRESH_TOKEN_FILE/);
+    } finally {
+      await mock.close();
+    }
+  });
+});

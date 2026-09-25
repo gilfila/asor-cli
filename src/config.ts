@@ -56,8 +56,10 @@ export interface ResolvedConfig {
   agentAuth: AgentAuthMode;
   /** A static bearer token for agent endpoints (ASOR_AGENT_TOKEN), used when agentAuth is `bearer`. */
   agentToken: string | undefined;
-  /** Where each value came from, so rotation knows whether it can persist a new refresh token. */
-  refreshTokenSource: 'env' | 'file' | 'none';
+  /** Where the refresh token came from, so rotation knows where (and whether) it can persist the new one. */
+  refreshTokenSource: 'env' | 'tokenFile' | 'file' | 'none';
+  /** ASOR_REFRESH_TOKEN_FILE: a writable file holding the refresh token, rewritten on rotation. For bot hosts. */
+  refreshTokenFile: string | undefined;
   profileExists: boolean;
   authMode: 'refresh_token' | 'authorization_code';
   authorizedAt: string | undefined;
@@ -162,17 +164,29 @@ export function resolveConfig(opts: { profile?: string; env?: Env } = {}): Resol
     asorBaseUrl: (env.ASOR_BASE_URL ?? saved.asorBaseUrl ?? `${origin}/asor/v1`).replace(/\/+$/, ''),
     clientId: env.ASOR_CLIENT_ID ?? saved.clientId,
     clientSecret: env.ASOR_CLIENT_SECRET ?? saved.clientSecret,
-    refreshToken: env.ASOR_REFRESH_TOKEN ?? saved.refreshToken,
+    refreshToken: env.ASOR_REFRESH_TOKEN ?? readTokenFile(env.ASOR_REFRESH_TOKEN_FILE) ?? saved.refreshToken,
     accessToken: env.ASOR_ACCESS_TOKEN || undefined,
     agentAuth,
     agentToken: env.ASOR_AGENT_TOKEN || undefined,
-    refreshTokenSource: env.ASOR_REFRESH_TOKEN ? 'env' : saved.refreshToken ? 'file' : 'none',
+    refreshTokenSource: env.ASOR_REFRESH_TOKEN ? 'env' : env.ASOR_REFRESH_TOKEN_FILE ? 'tokenFile' : saved.refreshToken ? 'file' : 'none',
+    refreshTokenFile: env.ASOR_REFRESH_TOKEN ? undefined : env.ASOR_REFRESH_TOKEN_FILE || undefined,
     profileExists: Boolean(file.profiles[profileName]),
     authMode: saved.authMode ?? 'refresh_token',
     authorizedAt: saved.authorizedAt,
     refreshTokenTtlDays: saved.refreshTokenTtlDays,
     clientAuth: parseClientAuthValue(env.ASOR_CLIENT_AUTH ?? saved.clientAuth ?? 'post'),
   };
+}
+
+function readTokenFile(path: string | undefined): string | undefined {
+  if (!path) return undefined;
+  try {
+    return readFileSync(path, 'utf8').trim() || undefined;
+  } catch (err) {
+    throw new CliError('config', `Cannot read ASOR_REFRESH_TOKEN_FILE (${path}): ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}.`, {
+      hint: 'Create the file with the refresh token in it, and make it writable: asor replaces it each time Workday rotates the token.',
+    });
+  }
 }
 
 function parseClientAuthValue(value: string): 'post' | 'basic' {

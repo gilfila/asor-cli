@@ -10,6 +10,12 @@
 - **Browser opening on Windows:** it now uses the URL protocol handler rather than `cmd /c start`, so OAuth query strings are no longer mangled.
 - **Token requests now send client credentials in the form body (`client_secret_post`) by default.** Workday's agent host rejects an HTTP Basic header alone with `{"error": "Invalid request"}`, which the first live sign-in against a real tenant hit. `--client-auth basic` / `ASOR_CLIENT_AUTH=basic` switches back, and a 400 `Invalid request` now suggests the other method.
 - **The secret prompt no longer disappears on Windows** once you start typing.
+- **Rotating refresh tokens.** A live tenant showed that Workday rotates the refresh token on every exchange. asor now handles this:
+  - A lock file serializes refreshes, so parallel invocations don't revoke each other's token.
+  - A process that waited reuses the token the other one obtained.
+  - The new **`ASOR_REFRESH_TOKEN_FILE`** keeps a bot host's token current. A plain `ASOR_REFRESH_TOKEN` now warns that it will stop working.
+- **Rate limits.** Token requests and ASOR reads retry `429`/`503` responses, honoring `Retry-After`. `asor login --authorize` also no longer forces a second exchange right after sign-in, which tripped the rate limit.
+- **Unknown agent ids.** Live ASOR answers `401` (not `404`) for an agent id that doesn't exist. asor now reports that as *not found* (exit 4). It retries on a 401 only for cached tokens, never for a token it just obtained.
 - **Mock tenant:** it now supports `/auth/authorize/{tenant}` and the `authorization_code` grant, with PKCE and redirect-URI checks.
 
 ## 0.2.0 — 2026-09-24

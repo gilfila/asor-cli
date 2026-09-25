@@ -1,6 +1,7 @@
 import type { FetchLike, TokenProvider } from './auth.js';
 import type { ResolvedConfig } from './config.js';
 import { CliError } from './errors.js';
+import { fetchWithRetry } from './http.js';
 import type { AgentCard } from './types.js';
 
 const PAGE_SIZE = 100;
@@ -46,8 +47,28 @@ export class AsorClient {
   }
 
   async getAgent(id: string): Promise<AgentCard> {
-    const body = await this.request('GET', `/agentDefinition/${encodeURIComponent(id)}`);
-    return unwrapCard(body);
+    try {
+      return unwrapCard(await this.request('GET', `/agentDefinition/${encodeURIComponent(id)}`));
+    } catch (err) {
+      // Live ASOR answers 401 (not 404) for an id that does not exist or is not visible. If the same token can still
+      // list agents, the credentials are fine and the id is the problem.
+      if (err instanceof CliError && err.status === 401 && (await this.canList())) {
+        throw new CliError('not_found', `No agent with id "${id}" is visible in ASOR.`, {
+          status: 401,
+          hint: 'ASOR returns 401 for ids that do not exist or that this user cannot see. Run `asor agents list` to see valid ids.',
+        });
+      }
+      throw err;
+    }
+  }
+
+  private async canList(): Promise<boolean> {
+    try {
+      await this.request('GET', '/agentDefinition?limit=1&offset=0');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Creates an agent definition. ASOR upserts when name, provider, and version match an existing one. */
@@ -62,7 +83,7 @@ export class AsorClient {
     for (;;) {
       const token = await this.tokens.getToken();
       this.debug(`${method} ${url}`);
-      const res = await this.fetchImpl(url, {
+      const init: RequestInit = {
         method,
         headers: {
           Authorization: `Bearer ${token.accessToken}`,
@@ -71,11 +92,16 @@ export class AsorClient {
           ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
-        signal: AbortSignal.timeout(this.timeoutMs),
-      });
+      };
+      const res =
+        method === 'GET'
+          ? await fetchWithRetry(this.fetchImpl, url, { ...init, timeoutMs: this.timeoutMs })
+          : await this.fetchImpl(url, { ...init, signal: AbortSignal.timeout(this.timeoutMs) });
       const text = await res.text();
-      // A cached token may have been revoked early. Retry once with a fresh exchange before giving up.
-      if (res.status === 401 && !retried && token.source !== 'env') {
+      // A token from the disk cache may have been revoked early: retry once with a fresh exchange. A token we just
+      // exchanged is not stale, so retrying would only spend the token endpoint's rate limit (and ASOR also uses 401
+      // for unknown agent ids).
+      if (res.status === 401 && !retried && token.source === 'cache') {
         retried = true;
         this.tokens.invalidate();
         await this.tokens.getToken({ forceRefresh: true });

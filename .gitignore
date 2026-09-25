@@ -13,3 +13,4 @@ asor-agents/
 .playwright-mcp/
 LIVE_TENANT_PLAN.md
 test/fixtures/live-*
+.asor-refresh-token

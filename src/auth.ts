@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { configDir, saveProfile, writePrivateFile, type ResolvedConfig } from './config.js';
+import { configDir, readConfigFile, saveProfile, writePrivateFile, type ResolvedConfig } from './config.js';
 import { CliError } from './errors.js';
+import { fetchWithRetry } from './http.js';
 
 export type FetchLike = typeof fetch;
 
@@ -125,7 +126,41 @@ export class TokenProvider {
     }
   }
 
+  /**
+   * Workday rotates the refresh token on every exchange and revokes the old one, so two processes refreshing at once
+   * (a bot answering two messages) would leave one holding a dead token. Refreshes are serialized with a lock file
+   * next to the config; a process that waited re-reads the stored refresh token and the token cache first, and
+   * reuses what the other process just obtained.
+   */
   private async exchange(): Promise<TokenInfo> {
+    if (this.cfg.refreshTokenSource === 'env') return this.exchangeUnlocked();
+    return withLock(join(configDir(this.env), 'refresh.lock'), async () => {
+      const before = this.cfg.refreshToken;
+      this.reloadRefreshToken();
+      if (this.cfg.refreshToken !== before) {
+        const cached = this.readCache();
+        if (cached) return cached;
+      }
+      return this.exchangeUnlocked();
+    });
+  }
+
+  /** Picks up a refresh token another process may have rotated and saved since this one started. */
+  private reloadRefreshToken(): void {
+    try {
+      if (this.cfg.refreshTokenSource === 'file' && this.cfg.profileExists) {
+        const saved = readConfigFile(this.env).profiles[this.cfg.profileName]?.refreshToken;
+        if (saved) this.cfg.refreshToken = saved;
+      } else if (this.cfg.refreshTokenSource === 'tokenFile' && this.cfg.refreshTokenFile) {
+        const saved = readFileSync(this.cfg.refreshTokenFile, 'utf8').trim();
+        if (saved) this.cfg.refreshToken = saved;
+      }
+    } catch {
+      // Keep the token we have.
+    }
+  }
+
+  private async exchangeUnlocked(): Promise<TokenInfo> {
     const { clientId, clientSecret, refreshToken, tokenUrl } = this.cfg;
     const missing = [
       !clientId && 'client id (ASOR_CLIENT_ID)',
@@ -137,12 +172,7 @@ export class TokenProvider {
     }
 
     const { headers, body } = tokenRequest(this.cfg.clientAuth, clientId!, clientSecret!, { grant_type: 'refresh_token', refresh_token: refreshToken! });
-    const res = await this.fetchImpl(tokenUrl, {
-      method: 'POST',
-      headers,
-      body,
-      signal: AbortSignal.timeout(30_000),
-    });
+    const res = await fetchWithRetry(this.fetchImpl, tokenUrl, { method: 'POST', headers, body });
 
     const text = await res.text();
     let json: TokenResponse = {};
@@ -157,6 +187,7 @@ export class TokenProvider {
       const reauth = `Run \`asor login --authorize --profile ${this.cfg.profileName}\` to sign in to Workday again.`;
       const hint =
         clientAuthHint(this.cfg.clientAuth, `${json.error ?? ''} ${text}`) ??
+        (res.status === 429 ? 'Workday is rate limiting token requests. Wait a minute and try again; the saved refresh token is still good.' : undefined) ??
         (json.error === 'invalid_grant' && this.cfg.authMode === 'authorization_code'
           ? `The refresh token expired or was revoked${this.cfg.refreshTokenTtlDays ? ` (this client's tokens last ${this.cfg.refreshTokenTtlDays} days)` : ''}. ${reauth}`
           : res.status === 400 || res.status === 401
@@ -182,10 +213,17 @@ export class TokenProvider {
       this.cfg.refreshToken = newToken;
       return;
     }
+    if (this.cfg.refreshTokenSource === 'tokenFile' && this.cfg.refreshTokenFile) {
+      writePrivateFile(this.cfg.refreshTokenFile, `${newToken}
+`);
+      this.cfg.refreshToken = newToken;
+      return;
+    }
     this.cfg.refreshToken = newToken;
     this.warn(
-      'Workday issued a new refresh token, but the current one came from ASOR_REFRESH_TOKEN, so it was not saved. ' +
-        'If your API client rotates refresh tokens, update the secret in your bot host, or store it with `asor login`.',
+      'Workday issued a new refresh token (it rotates them on every refresh and revokes the old one), but the current ' +
+        'one came from ASOR_REFRESH_TOKEN, so it could not be saved and will stop working. On bot hosts use ' +
+        'ASOR_REFRESH_TOKEN_FILE (a writable file) or a saved profile instead.',
     );
   }
 
@@ -227,5 +265,45 @@ export class TokenProvider {
     } catch (err) {
       this.warn(`could not write the token cache (${(err as Error).message}); continuing without it.`);
     }
+  }
+}
+
+const LOCK_STALE_MS = 30_000;
+const LOCK_WAIT_MS = 20_000;
+
+/**
+ * Runs fn while holding an exclusive lock file. A lock older than 30s is treated as abandoned (a crashed process).
+ * If the lock cannot be taken within 20s, fn runs anyway: a slow refresh is better than a hung bot.
+ */
+export async function withLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+  let owned = false;
+  try {
+    mkdirSync(join(path, '..'), { recursive: true });
+  } catch {
+    // The open below reports the real problem.
+  }
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  while (!owned) {
+    try {
+      closeSync(openSync(path, 'wx'));
+      owned = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') break;
+      try {
+        if (Date.now() - statSync(path).mtimeMs > LOCK_STALE_MS) {
+          rmSync(path, { force: true });
+          continue;
+        }
+      } catch {
+        continue; // released between our open and stat
+      }
+      if (Date.now() > deadline) break;
+      await new Promise((r) => setTimeout(r, 50 + Math.floor(Math.random() * 100)));
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    if (owned) rmSync(path, { force: true });
   }
 }
