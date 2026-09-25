@@ -17,7 +17,7 @@ This is an open-source tool, public at **github.com/gilfila/asor-cli**, that **g
 ## Run / Build / Test
 ```bash
 npm install          # also builds (prepare)
-npm test             # clean + build + node --test dist/test/**/*.test.js  (76 tests)
+npm test             # clean + build + node --test dist/test/**/*.test.js  (79 tests)
 npm run build && node dist/src/cli.js ui   # the picker (needs ASOR_* or a saved profile; npm run mock for a fake tenant)
 npm run mock         # fake tenant on :4010; prints the ASOR_* env to export
 node examples/shared/demo.mjs   # bot-runner end-to-end against the mock
@@ -41,6 +41,7 @@ The build writes to `dist/{src,test,mock}`. The bin is `dist/src/cli.js`. `scrip
 - **`examples/`**
   - `shared/asor-runner.mjs`: safe spawn helper (no shell, stdin prompt, `--` before the agent, strips bot secrets)
   - `slack-bolt/`, `teams/`, `claude-skill/`
+  - `echo-agent/`: a stateless A2A test agent, deployed free on Vercel Hobby (`asor-echo-agent`) and registered in `wday_wcpdev8`
 
 ## Conventions
 - **API facts.** They come from the Workday/asor v1.2 spec and `hive/buzz-workday-asor/register.mjs`:
@@ -75,16 +76,20 @@ The UI was verified visually in both light and dark mode against the mock tenant
 
 **Also:** the README was reframed with a screenshot at `docs/asor-ui.png`, the version is 0.2.0, and there are 54 green tests.
 
-**Live-tenant rollout, Phases 0–4 are done (2026-09-25).**
-- **Login:** Tony registered the `asor-cli` API client in `wday_wcpdev8` (Authorization Code, PKCE off, https://localhost:8765/callback, 30-day refresh, ASOR scope). `asor login --authorize` works in paste mode, and `asor whoami` passes against live ASOR. The registry is empty.
-- **Live quirks, now handled:**
-  - The token endpoint needs `client_secret_post` (the default now; `--client-auth basic` is the fallback).
-  - It rate-limits (retry with Retry-After).
-  - Refresh tokens **rotate on every exchange**. A `refresh.lock` serializes refreshes, and bot hosts use `ASOR_REFRESH_TOKEN_FILE`.
-  - An unknown agent id returns 401, which is mapped to not_found.
-  - The list shape is `{total, data}`.
-- 76 tests pass.
-- **Next:** Phase 5. Tony picks the hosting for a callable test agent and approves registering it. The registry is empty, and the "Unregistered Workday Agents" page shows "Registration services currently unavailable".
+**Live-tenant rollout, Phases 0–6 are done (2026-09-25).**
+- **The full path works against `wday_wcpdev8`:** browser sign-in → ASOR list/get → A2A invoke → a generated per-agent CLI.
+- **Test agent:** `examples/echo-agent/` is deployed free on **Vercel Hobby** (`asor-echo-agent`, https://asor-echo-agent.vercel.app/api/a2a). With Tony's approval it is registered in ASOR as **"asor-cli Echo Test"**, id `0a37edfa282b100203ae0764f6050000`.
+- **Live quirks, all handled:**
+  - `client_secret_post`
+  - refresh-token rotation (lock + `ASOR_REFRESH_TOKEN_FILE`)
+  - 429 rate limits
+  - 401 for an unknown id
+  - a `workdayConfig` entry per skill is required to register (auto-filled)
+- 79 tests pass.
+- **Remaining optional phases:**
+  - Phase 7: the Slack example against the generated CLI. Tony provides Slack tokens.
+  - Phase 8: wrap-up and release 0.3.0.
+  - Also optional: the `asor ui` browser pass on the live tenant.
 
 **The live-tenant rollout (direct ASOR, no Orchestrate).** The checklist is in `LIVE_TENANT_PLAN.md`. It is gitignored because it names the tenant. Tick it as you go.
 

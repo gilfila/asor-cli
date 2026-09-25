@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "rewrites": [
+    { "source": "/.well-known/agent-card.json", "destination": "/api/agent-card" },
+    { "source": "/.well-known/agent.json", "destination": "/api/agent-card" }
+  ],
+  "functions": {
+    "api/*.js": { "maxDuration": 10 }
+  }
+}

@@ -166,7 +166,8 @@ describe('asor CLI against the mock tenant', () => {
 
   it('registers an agent from a card file (upsert by name + version)', async () => {
     const file = join(tempDir(), 'card.json');
-    const card = { name: 'New Agent', description: 'd', url: 'https://example.com/a2a', version: '0.1.0', provider: { id: 'Provider=SELF-BUILT' }, platform: { id: 'Platform=OTHER' }, capabilities: {}, skills: [] };
+    // No workdayConfig: asor adds one entry per skill, which live ASOR requires.
+    const card = { name: 'New Agent', description: 'd', url: 'https://example.com/a2a', version: '0.1.0', provider: { id: 'Provider=SELF-BUILT' }, platform: { id: 'Platform=OTHER' }, capabilities: {}, skills: [{ id: 's1', name: 'S1', description: 'd' }] };
     writeFileSync(file, JSON.stringify(card));
     const r1 = JSON.parse((await runCli(['agents', 'register', '--file', file, '--json'], { env })).stdout);
     const r2 = JSON.parse((await runCli(['agents', 'register', '--file', file, '--json'], { env })).stdout);

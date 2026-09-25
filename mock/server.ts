@@ -229,6 +229,12 @@ export async function startMockServer(opts: MockOptions = {}): Promise<MockServe
     }
     if (path === '/agentDefinition' && req.method === 'POST') {
       const card = JSON.parse(await readBody(req)) as Card;
+      // Mirror live validation: every skill needs a workdayConfig entry with the same skillId.
+      const skillIds = ((card.skills as Array<{ id?: string }> | undefined) ?? []).map((sk) => sk.id);
+      const configured = new Set(((card.workdayConfig as Array<{ skillId?: string }> | undefined) ?? []).map((w) => w.skillId));
+      if (skillIds.some((sid) => !configured.has(sid))) {
+        return send(res, 400, { error: 'invalid request: validation errors', errors: [{ error: 'Ensure that each skill in workdayConfig has a matching skills entry with the same skill ID.' }] });
+      }
       const existing = agents.find((a) => a.name === card.name && a.version === card.version);
       if (existing) {
         Object.assign(existing, card, { id: existing.id });

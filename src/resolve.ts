@@ -52,6 +52,8 @@ export function pickAgent(agents: AgentCard[], ref: string): AgentCard {
     (a) => (a.name ?? '').toLowerCase() === lower,
     (a) => slug !== '' && slugify(a.name ?? '') === slug,
     (a) => (a.name ?? '').toLowerCase().includes(lower),
+    // "echo-test" should find "asor-cli Echo Test".
+    (a) => slug !== '' && slugify(a.name ?? '').includes(slug),
   ];
   for (const test of tiers) {
     const hits = agents.filter(test);

@@ -15,6 +15,9 @@
   - A process that waited reuses the token the other one obtained.
   - The new **`ASOR_REFRESH_TOKEN_FILE`** keeps a bot host's token current. A plain `ASOR_REFRESH_TOKEN` now warns that it will stop working.
 - **Rate limits.** Token requests and ASOR reads retry `429`/`503` responses, honoring `Retry-After`. `asor login --authorize` also no longer forces a second exchange right after sign-in, which tripped the rate limit.
+- **`agents register` auto-fills `workdayConfig`.** Live ASOR rejects a definition unless every skill has a `workdayConfig` entry. Skills without one get a default entry: `Mode=Delegate`, no Workday resources.
+- **`examples/echo-agent`:** a stateless, dependency-free A2A test agent, deployable on Vercel's free Hobby plan. One is live at https://asor-echo-agent.vercel.app.
+- **Partial slugs resolve:** "echo-test" now finds "asor-cli Echo Test".
 - **Unknown agent ids.** Live ASOR answers `401` (not `404`) for an agent id that doesn't exist. asor now reports that as *not found* (exit 4). It retries on a 401 only for cached tokens, never for a token it just obtained.
 - **Mock tenant:** it now supports `/auth/authorize/{tenant}` and the `authorization_code` grant, with PKCE and redirect-URI checks.
 

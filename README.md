@@ -114,6 +114,7 @@ Every generated CLI and `asor invoke` follow the same contract.
 | **Claude Code / agents** | [`examples/claude-skill`](examples/claude-skill): copy the wrapped `SKILL.md` into `.claude/skills/`. |
 | **Any LLM tool-calling bot** | Register `tool.json`, run `invocation.command` with the message on stdin, and return `text`. |
 | **Scripts / cron / CI** | `echo "..." \| benefits-helper ask --json \| jq -r .text`. Use the exit code to decide what happens next. |
+| **Just testing?** | [`examples/echo-agent`](examples/echo-agent): a free, stateless A2A echo agent to register in ASOR. It proves the whole path (ASOR, then A2A, then a generated CLI) without a real agent. |
 | **Node code** | `import { createContext, resolveAgent, a2aInvoker } from 'asor-cli'`. This skips the subprocess entirely. |
 
 The bot examples share [`examples/shared/asor-runner.mjs`](examples/shared/asor-runner.mjs), a small, safe way to call the CLI from a bot. Run `node examples/shared/demo.mjs` to exercise it against the mock tenant.

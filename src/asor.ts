@@ -73,7 +73,7 @@ export class AsorClient {
 
   /** Creates an agent definition. ASOR upserts when name, provider, and version match an existing one. */
   async registerAgent(card: AgentCard): Promise<AgentCard> {
-    const body = await this.request('POST', '/agentDefinition', card);
+    const body = await this.request('POST', '/agentDefinition', withWorkdayConfig(card));
     return unwrapCard(body);
   }
 
@@ -165,4 +165,25 @@ function unwrapCard(body: unknown): AgentCard {
     return o as AgentCard;
   }
   throw new CliError('http', 'ASOR returned an unexpected agent definition payload.');
+}
+
+interface WorkdayConfigEntry {
+  skillId?: string;
+  executionMode?: { id?: string };
+  workdayResources?: unknown[];
+  [key: string]: unknown;
+}
+
+/**
+ * Live ASOR rejects a definition unless every skill has a `workdayConfig` entry ("Ensure that each skill in
+ * workdayConfig has a matching skills entry with the same skill ID"). Skills without one get a default entry:
+ * human-invoked (`Mode=Delegate`) and using no Workday tools. Entries you supply are kept as they are.
+ */
+export function withWorkdayConfig(card: AgentCard): AgentCard {
+  const skills = (card.skills ?? []).filter((s) => typeof s.id === 'string' && s.id);
+  if (skills.length === 0) return card;
+  const existing = Array.isArray(card.workdayConfig) ? (card.workdayConfig as WorkdayConfigEntry[]) : [];
+  const covered = new Set(existing.map((e) => e.skillId));
+  const added = skills.filter((s) => !covered.has(s.id)).map((s) => ({ skillId: s.id, executionMode: { id: 'Mode=Delegate' }, workdayResources: [] }));
+  return added.length ? { ...card, workdayConfig: [...existing, ...added] } : card;
 }

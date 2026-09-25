@@ -1,0 +1,9 @@
+{
+  "name": "asor-echo-agent",
+  "private": true,
+  "type": "module",
+  "description": "Stateless A2A echo agent for testing asor-cli. No dependencies.",
+  "engines": {
+    "node": ">=22"
+  }
+}

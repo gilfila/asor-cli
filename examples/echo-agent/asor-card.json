@@ -1,0 +1,68 @@
+{
+  "name": "asor-cli Echo Test",
+  "description": "A stateless test agent for asor-cli (github.com/gilfila/asor-cli). It echoes what you send. Say \"ask\" to get a follow-up question, or \"fail\" to see a failed task.",
+  "url": "https://asor-echo-agent.vercel.app/api/a2a",
+  "provider": {
+    "id": "Provider=SELF-BUILT"
+  },
+  "platform": {
+    "id": "Platform=OTHER"
+  },
+  "version": "1.0.0",
+  "externalAgentID": "asor-cli-echo-test",
+  "externalTenantID": "asor-echo-agent.vercel.app",
+  "capabilities": {
+    "pushNotifications": false,
+    "streaming": true,
+    "stateTransitionHistory": false
+  },
+  "defaultInputModes": [
+    {
+      "type": "text/plain"
+    }
+  ],
+  "defaultOutputModes": [
+    {
+      "type": "text/plain"
+    }
+  ],
+  "skills": [
+    {
+      "id": "echo",
+      "name": "Echo",
+      "description": "Echo the message back.",
+      "tags": [
+        {
+          "tag": "test"
+        }
+      ]
+    },
+    {
+      "id": "shout",
+      "name": "Shout",
+      "description": "Echo the message back in capitals.",
+      "tags": [
+        {
+          "tag": "test"
+        }
+      ]
+    }
+  ],
+  "supportsAuthenticatedExtendedCard": false,
+  "workdayConfig": [
+    {
+      "skillId": "echo",
+      "executionMode": {
+        "id": "Mode=Delegate"
+      },
+      "workdayResources": []
+    },
+    {
+      "skillId": "shout",
+      "executionMode": {
+        "id": "Mode=Delegate"
+      },
+      "workdayResources": []
+    }
+  ]
+}

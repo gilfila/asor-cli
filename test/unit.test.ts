@@ -190,3 +190,47 @@ describe('fetchWithRetry', () => {
     await assert.rejects(fetchWithRetry(hardFail, 'https://example.test/x', { method: 'GET' }), /fetch failed/);
   });
 });
+
+describe('withWorkdayConfig', () => {
+  it('adds a Delegate entry for each skill that lacks one and keeps existing entries', async () => {
+    const { withWorkdayConfig } = await import('../src/asor.js');
+    const out = withWorkdayConfig({
+      name: 'x',
+      skills: [{ id: 'a' }, { id: 'b' }],
+      workdayConfig: [{ skillId: 'a', executionMode: { id: 'Mode=Ambient' }, workdayResources: [{ tool_name: 't' }] }],
+    });
+    assert.deepEqual(out.workdayConfig, [
+      { skillId: 'a', executionMode: { id: 'Mode=Ambient' }, workdayResources: [{ tool_name: 't' }] },
+      { skillId: 'b', executionMode: { id: 'Mode=Delegate' }, workdayResources: [] },
+    ]);
+  });
+});
+
+describe('resolve: partial slugs', () => {
+  it('matches a partial slug across spaces and punctuation', () => {
+    assert.equal(pickAgent([{ id: '1', name: 'asor-cli Echo Test' }, { id: '2', name: 'Payroll' }], 'echo-test').id, '1');
+  });
+});
+
+describe('examples/echo-agent (the deployed test agent)', () => {
+  it('answers send, stream, follow-up, and failure over A2A', async () => {
+    const { createServer } = await import('node:http');
+    const handler = (await import(new URL('../../examples/echo-agent/api/a2a.js', import.meta.url).href)).default;
+    const { a2aInvoker } = await import('../src/invoke.js');
+    const srv = createServer((req, res) => handler(req, res)).listen(0, '127.0.0.1');
+    await new Promise((r) => srv.once('listening', r));
+    try {
+      const card = { name: 'echo', url: `http://127.0.0.1:${(srv.address() as { port: number }).port}/api/a2a` };
+      const opts = { timeoutMs: 5000 };
+      assert.equal((await a2aInvoker.invoke(card, { text: 'hi' }, opts)).text, 'Echo: hi');
+      assert.equal((await a2aInvoker.invoke(card, { text: 'hi', skill: 'shout' }, { ...opts, stream: true })).text, 'Echo: HI');
+      const q = await a2aInvoker.invoke(card, { text: 'please ask me' }, opts);
+      assert.equal(q.state, 'input-required');
+      const a = await a2aInvoker.invoke(card, { text: '2026', contextId: q.contextId!, taskId: q.taskId! }, opts);
+      assert.deepEqual([a.state, a.text, a.contextId], ['completed', 'Echo: 2026', q.contextId]);
+      assert.equal((await a2aInvoker.invoke(card, { text: 'fail' }, opts)).state, 'failed');
+    } finally {
+      srv.close();
+    }
+  });
+});
